@@ -1,0 +1,1 @@
+Now requires JuicyPixels for use of converting to and from png files

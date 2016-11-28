@@ -4,66 +4,113 @@
 import Control.Exception
 import Graphics.UI.GLUT
 import Data.IORef
+import Codec.Picture as J
+import Codec.Picture.Saving
+import qualified Data.ByteString.Lazy as B
+
+
+{-- TODO
+
+Finish conversion from our images to pngs through juicypixels
+
+Remove / rename pixel to remove x y location and instead fill entire rect
+    or edit conversion to fill remaining elements with transparent
+
+--}
+
+{---------------------------   Convert to Codec Image and PNG   -------------------}
+
+convertToPng :: MyImage -> B.ByteString
+convertToPng image = imageToPng (toJImage image)
+    where
+        toJImage :: MyImage -> DynamicImage -- ImageRGBA (Image PixelRGBA8)
+        toJImage (MyImage pixels w h) = undefined
+        toJColor :: MyColor -> J.PixelRGBA8 -- (even A layer is 0-255)
+        toJColor (MyColor r g b a) = undefined
+
 
 
 {----------------------------------  Main and Display ----------------------------}
 
 -- Main Function
 -- Yeah I have no idea what any of this does
+
 main :: IO ()
 main = do
   (_progName, _args) <- getArgsAndInitialize
-  initialDisplayMode $= [DoubleBuffered]
-  _window <- createWindow "Hello World"
+  _window <- createWindow "Test"
   iter <- newIORef 1
   displayCallback $= display iter
   reshapeCallback $= Just reshape
-  --idleCallback $= Just (idle iter)
+  idleCallback $= Just (idle iter)
   mainLoop
-
+  
 reshape :: ReshapeCallback
 reshape size = do
   viewport $= (Position 0 0, size)
   postRedisplay Nothing
-
-display :: IORef Int -> DisplayCallback
-display iter = do
-  --clear [ColorBuffer]
-  --a <- get iter
-  draw (gradientImage (blankImage 5 5))
-  flush
   
 idle :: IORef Int -> IdleCallback
 idle iter = do
   iter $~! (+ 1)
   postRedisplay Nothing
 
-{-
-display :: DisplayCallback
-display = do
+display :: IORef Int -> DisplayCallback
+display iter = do
   clear [ ColorBuffer ]       -- clears canvas?
-  draw (gradientImage (blankImage 500 500))  -- Converts points to an image 500 x 500 (points must be in range 0 - 500)
+  a <- get iter
+  draw (blueRotate (gradientImage (blankImage 25 25)) a)  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
   flush                       -- Sends openGL commands to graphics for display
--}
 
-draw :: Image -> IO ()
-draw (Image points w h) = do
-                            renderPrimitive Points $
-                                mapM_ (\point -> drawSingle point w h) points
+draw :: MyImage -> IO ()
+draw (MyImage points w h) = do
+                            renderPrimitive Quads $
+                                mapM_ (\point -> drawBigPixel point w h) points
+                                
+pixelSize = 0.05
                 
 drawSingle :: MyPixel -> Int -> Int -> IO ()
-drawSingle (MyPixel (MyPoint x y) (MyColor r g b o)) w h = do
+drawSingle (MyPixel (MyPoint x y) (MyColor r g b a)) w h = do
                                                             let
                                                                 scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
                                                                 toFloat v = (fromIntegral (v :: Int) :: Float)
                                                             color  $ Color4 (scaleColor r)
                                                                             (scaleColor g)
                                                                             (scaleColor b)
-                                                                            o
+                                                                            a
                                                             vertex $ Vertex2 (((toFloat x) / (toFloat w) * 2) - 1)
                                                                              (((toFloat y) / (toFloat h) * 2) - 1)
-
-
+                                                                             
+drawBigPixel :: MyPixel -> Int -> Int -> IO ()
+drawBigPixel (MyPixel (MyPoint x y)
+                      (MyColor r g b a))
+                      w
+                      h = do
+                            let
+                                scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
+                                toFloat    v = (fromIntegral (v :: Int) :: Float)
+                                x1 = (((toFloat x) / (toFloat w) * 2) - 1)
+                                x2 = x1 + pixelSize
+                                y1 = (((toFloat y) / (toFloat h) * 2) - 1)
+                                y2 = y1 + pixelSize
+                            color  $ Color4 (scaleColor r)
+                                            (scaleColor g)
+                                            (scaleColor b)
+                                            a
+                            vertex $ Vertex2 x1 y1
+                            vertex $ Vertex2 x2 y1
+                            vertex $ Vertex2 x2 y2
+                            vertex $ Vertex2 x1 y2
+                                                 
+                                
+                                                                                
+                                                                             
+blueRotate :: MyImage -> Int -> MyImage
+blueRotate (MyImage pixels w h) v = MyImage (map (\(MyPixel pnt (MyColor r g b a)) -> 
+                                            MyPixel pnt (MyColor r g (rotate b v) a)) pixels)
+                                       w h
+            where
+                rotate b v = (b + (v * 2)) `mod` 256 
 
                                                             
                                                             
@@ -71,14 +118,14 @@ drawSingle (MyPixel (MyPoint x y) (MyColor r g b o)) w h = do
                                                             
 {-----------------------------   Library Functions   -------------------------}
 
-blankImage :: Int -> Int -> Image
-blankImage w h = Image (map f points) w h
+blankImage :: Int -> Int -> MyImage
+blankImage w h = MyImage (map f points) w h
                    where
                         f = (\point -> MyPixel point (MyColor 256 256 256 1))
                         points = [(MyPoint x y) | x <- [1..w], y <- [1..h] ]
 
-gradientImage :: Image -> Image
-gradientImage (Image pixels w h) = Image (map (\p -> changePixel p) pixels) w h
+gradientImage :: MyImage -> MyImage
+gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
                                     where
                                         changePixel (MyPixel (MyPoint x y) _) = MyPixel (MyPoint x y)
                                                                                         (MyColor (round (((toFloat x) / (toFloat w)) * 256))
@@ -104,42 +151,45 @@ data MyColor = MyColor { red     :: Int
 data MyPixel = MyPixel MyPoint MyColor
 
 instance Show MyColor where
-    show (MyColor r g b o) = "(" ++ show r ++ 
+    show (MyColor r g b a) = "("  ++ show r ++ 
                              ", " ++ show g ++ 
                              ", " ++ show b ++ 
-                             ", " ++ show o ++ ")"
+                             ", " ++ show a ++ ")"
     
     
 {----------------------------    Smart Constructors    -----------------------------}
 
 mkPixel :: Int -> Int -> Int -> Int -> Int -> Double -> MyPixel
-mkPixel x y r g b o = MyPixel (MyPoint x y) (mkColor r g b o)
+mkPixel x y r g b a = MyPixel (MyPoint x y) (mkColor r g b a)
         
 mkColor :: Int -> Int -> Int -> Double -> MyColor
-mkColor r g b o = assert (r >= 0 && g >= 0 && b >= 0 &&
+mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
                           r < 256 && g < 256 && b < 256 &&
-                          o >= 0 && o <= 1)
-                         $ MyColor r g b o
+                          a >= 0 && a <= 1)
+                         $ MyColor r g b a
 
                          
                          
                          
 {----------------------------    Images and Animations     ---------------------------}
 
--- Image contains a list of MyPixels
+-- MyImage contains a list of MyPixels
 -- and an integer describing its width
 -- and one for its height
-data Image = Image [MyPixel] Int Int 
+data MyImage = MyImage [MyPixel] Int Int 
 
-imageMap :: (MyPixel -> MyPixel) -> Image -> Image
-imageMap f (Image pxls h w) = Image (map f pxls) h w
+imageMap :: (MyPixel -> MyPixel) -> MyImage -> MyImage
+imageMap f (MyImage pxls h w) = MyImage (map f pxls) h w
 
 
 -- Maintains speed of animation as number of loops per frame
-data Animation = Animation [Image] Int
+data Animation = Animation [MyImage] Int
 
-animationMap :: (Image -> Image) -> Animation -> Animation
-animationMap f (Animation images loops) = Animation (map f images) loops
+getFrame :: Animation -> Int -> MyImage
+getFrame (Animation imgs _) frame = (!!) imgs (frame `mod` (length imgs))
+
+animationMap :: (MyImage -> MyImage) -> Animation -> Animation
+animationMap f (Animation images frames) = Animation (map f images) frames
 
 
 
@@ -163,31 +213,31 @@ animationMap f (Animation images loops) = Animation (map f images) loops
 --- Helper function applications
 
 applyRed :: (Int -> Int) -> MyPixel -> MyPixel
-applyRed f (MyPixel r g b o) = MyPixel (f r) g b o
+applyRed f (MyPixel r g b a) = MyPixel (f r) g b a
 
 applyGreen :: (Int -> Int) -> MyPixel -> MyPixel
-applyGreen f (MyPixel r g b o) = MyPixel r (f g) b o
+applyGreen f (MyPixel r g b a) = MyPixel r (f g) b a
 
 applyBlue :: (Int -> Int) -> MyPixel -> MyPixel
-applyBlue f (MyPixel r g b o) = MyPixel r g (f b) o
+applyBlue f (MyPixel r g b a) = MyPixel r g (f b) a
 
 applyOpac :: (Double -> Double) -> MyPixel -> MyPixel
-applyOpac f (MyPixel r g b o) = MyPixel r g b (f o)
+applyOpac f (MyPixel r g b a) = MyPixel r g b (f a)
 
 
 
 --- Helper MyPixel mappings onto images
 
-redMap :: (Int -> Int) -> Image -> Image
+redMap :: (Int -> Int) -> MyImage -> MyImage
 redMap f = imageMap (\c -> applyRed f c)
 
-greenMap :: (Int -> Int) -> Image -> Image
+greenMap :: (Int -> Int) -> MyImage -> MyImage
 greenMap f = imageMap (\c -> applyGreen f c)
 
-blueMap :: (Int -> Int) -> Image -> Image
+blueMap :: (Int -> Int) -> MyImage -> MyImage
 blueMap f = imageMap (\c -> applyBlue f c)
  
-opacMap :: (Double -> Double) -> Image -> Image
+opacMap :: (Double -> Double) -> MyImage -> MyImage
 opacMap f = imageMap (\c -> applyOpac f c)
 
 
@@ -212,7 +262,7 @@ shiftOpac val change
 
 -- Shifting example
     
-plusFiveRed :: Image -> Image
+plusFiveRed :: MyImage -> MyImage
 plusFiveRed = redMap (\v -> shiftMyPixel 5 v)
 
 
