@@ -4,9 +4,11 @@
 import Control.Exception
 import Graphics.UI.GLUT
 import Data.IORef
-import Codec.Picture as J
 import Codec.Picture.Saving
+import qualified Codec.Picture as J
 import qualified Data.ByteString.Lazy as B
+import qualified Data.Vector.Storable as V
+
 
 
 {-- TODO
@@ -21,10 +23,10 @@ Remove / rename pixel to remove x y location and instead fill entire rect
 {---------------------------   Convert to Codec Image and PNG   -------------------}
 
 convertToPng :: MyImage -> B.ByteString
-convertToPng image = imageToPng (toJImage image)
+convertToPng image = J.encodePng (toJImage image)
     where
-        toJImage :: MyImage -> DynamicImage -- ImageRGBA (Image PixelRGBA8)
-        toJImage (MyImage pixels w h) = undefined
+        toJImage :: MyImage -> J.Image J.PixelRGBA8 -- ImageRGBA (Image PixelRGBA8)
+        toJImage (MyImage pixels w h) = J.Image w h (V.fromList (map toJColor pixels))
         toJColor :: MyColor -> J.PixelRGBA8 -- (even A layer is 0-255)
         toJColor (MyColor r g b a) = undefined
 
@@ -63,51 +65,35 @@ display iter = do
   flush                       -- Sends openGL commands to graphics for display
 
 draw :: MyImage -> IO ()
-draw (MyImage points w h) = do
+draw (MyImage pixels w h) = do
                             renderPrimitive Quads $
                                 mapM_ (\point -> drawBigPixel point w h) points
                                 
 pixelSize = 0.05
-                
-drawSingle :: MyPixel -> Int -> Int -> IO ()
-drawSingle (MyPixel (MyPoint x y) (MyColor r g b a)) w h = do
-                                                            let
-                                                                scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
-                                                                toFloat v = (fromIntegral (v :: Int) :: Float)
-                                                            color  $ Color4 (scaleColor r)
-                                                                            (scaleColor g)
-                                                                            (scaleColor b)
-                                                                            a
-                                                            vertex $ Vertex2 (((toFloat x) / (toFloat w) * 2) - 1)
-                                                                             (((toFloat y) / (toFloat h) * 2) - 1)
                                                                              
-drawBigPixel :: MyPixel -> Int -> Int -> IO ()
-drawBigPixel (MyPixel (MyPoint x y)
-                      (MyColor r g b a))
-                      w
-                      h = do
-                            let
-                                scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
-                                toFloat    v = (fromIntegral (v :: Int) :: Float)
-                                x1 = (((toFloat x) / (toFloat w) * 2) - 1)
-                                x2 = x1 + pixelSize
-                                y1 = (((toFloat y) / (toFloat h) * 2) - 1)
-                                y2 = y1 + pixelSize
-                            color  $ Color4 (scaleColor r)
-                                            (scaleColor g)
-                                            (scaleColor b)
-                                            a
-                            vertex $ Vertex2 x1 y1
-                            vertex $ Vertex2 x2 y1
-                            vertex $ Vertex2 x2 y2
-                            vertex $ Vertex2 x1 y2
-                                                 
+drawBigPixel :: MyColor -> Int -> Int -> Int -> Int -> IO ()
+drawBigPixel (MyColor r g b a) x y w h = do
+                                            let
+                                                scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
+                                                toFloat    v = (fromIntegral (v :: Int) :: Float)
+                                                x1 = (((toFloat x) / (toFloat w) * 2) - 1)
+                                                x2 = x1 + pixelSize
+                                                y1 = (((toFloat y) / (toFloat h) * 2) - 1)
+                                                y2 = y1 + pixelSize
+                                            color  $ Color4 (scaleColor r)
+                                                            (scaleColor g)
+                                                            (scaleColor b)
+                                                            a
+                                            vertex $ Vertex2 x1 y1
+                                            vertex $ Vertex2 x2 y1
+                                            vertex $ Vertex2 x2 y2
+                                            vertex $ Vertex2 x1 y2
+                                                                 
                                 
                                                                                 
                                                                              
 blueRotate :: MyImage -> Int -> MyImage
-blueRotate (MyImage pixels w h) v = MyImage (map (\(MyPixel pnt (MyColor r g b a)) -> 
-                                            MyPixel pnt (MyColor r g (rotate b v) a)) pixels)
+blueRotate (MyImage pixels w h) v = MyImage (map (\(MyColor r g b a) -> (MyColor r g (rotate b v) a)) pixels)
                                        w h
             where
                 rotate b v = (b + (v * 2)) `mod` 256 
@@ -119,20 +105,16 @@ blueRotate (MyImage pixels w h) v = MyImage (map (\(MyPixel pnt (MyColor r g b a
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
-blankImage w h = MyImage (map f points) w h
-                   where
-                        f = (\point -> MyPixel point (MyColor 256 256 256 1))
-                        points = [(MyPoint x y) | x <- [1..w], y <- [1..h] ]
+blankImage w h = [MyColor 256 256 256 1 | _ <- w , _ <- h]
 
 gradientImage :: MyImage -> MyImage
 gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
-                                    where
-                                        changePixel (MyPixel (MyPoint x y) _) = MyPixel (MyPoint x y)
-                                                                                        (MyColor (round (((toFloat x) / (toFloat w)) * 256))
-                                                                                                 (round (((toFloat y) / (toFloat h)) * 256))
-                                                                                                 128    
-                                                                                                 1)
-                                        toFloat v = (fromIntegral (v :: Int) :: Float)
+              where
+                changePixel _ = MyColor (round (((toFloat x) / (toFloat w)) * 256))
+                                        (round (((toFloat y) / (toFloat h)) * 256))
+                                        128    
+                                        1
+                toFloat v = (fromIntegral (v :: Int) :: Float)
 
 
 
@@ -147,8 +129,6 @@ data MyColor = MyColor { red     :: Int
                        , green   :: Int 
                        , blue    :: Int
                        , opacity :: Double }
-    
-data MyPixel = MyPixel MyPoint MyColor
 
 instance Show MyColor where
     show (MyColor r g b a) = "("  ++ show r ++ 
@@ -158,9 +138,6 @@ instance Show MyColor where
     
     
 {----------------------------    Smart Constructors    -----------------------------}
-
-mkPixel :: Int -> Int -> Int -> Int -> Int -> Double -> MyPixel
-mkPixel x y r g b a = MyPixel (MyPoint x y) (mkColor r g b a)
         
 mkColor :: Int -> Int -> Int -> Double -> MyColor
 mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
@@ -176,10 +153,10 @@ mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
 -- MyImage contains a list of MyPixels
 -- and an integer describing its width
 -- and one for its height
-data MyImage = MyImage [MyPixel] Int Int 
+data MyImage = MyImage [MyColor] Int Int 
 
-imageMap :: (MyPixel -> MyPixel) -> MyImage -> MyImage
-imageMap f (MyImage pxls h w) = MyImage (map f pxls) h w
+imageMap :: (MyColor -> MyColor) -> MyImage -> MyImage
+imageMap f (MyImage pixels h w) = MyImage (map f pixels) h w
 
 
 -- Maintains speed of animation as number of loops per frame
