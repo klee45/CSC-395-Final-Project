@@ -26,9 +26,9 @@ convertToPng :: MyImage -> B.ByteString
 convertToPng image = J.encodePng (toJImage image)
     where
         toJImage :: MyImage -> J.Image J.PixelRGBA8 -- ImageRGBA (Image PixelRGBA8)
-        toJImage (MyImage pixels w h) = J.Image w h (V.fromList (map toJColor pixels))
-        toJColor :: MyColor -> J.PixelRGBA8 -- (even A layer is 0-255)
-        toJColor (MyColor r g b a) = undefined
+        toJImage (MyImage pixels w h) = J.Image w h (V.fromList (map toPixelBase pixels))
+        toPixelBase :: MyColor -> J.PixelBaseComponent J.PixelRGBA8 -- (even A layer is 0-255)
+        toPixelBase (MyColor r g b a) = undefined
 
 
 
@@ -61,33 +61,35 @@ display :: IORef Int -> DisplayCallback
 display iter = do
   clear [ ColorBuffer ]       -- clears canvas?
   a <- get iter
-  draw (blueRotate (gradientImage (blankImage 25 25)) a)  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
+  draw (toDisplayable (blueRotate (gradientImage (blankImage 25 25)) a))  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
   flush                       -- Sends openGL commands to graphics for display
 
-draw :: MyImage -> IO ()
-draw (MyImage pixels w h) = do
-                            renderPrimitive Quads $
-                                mapM_ (\point -> drawBigPixel point w h) points
+draw :: Displayable -> IO ()
+draw (Displayable pixels w h) = do
+                                    renderPrimitive Quads $
+                                        mapM_ (\point -> drawBigPixel point w h) pixels
                                 
 pixelSize = 0.05
                                                                              
-drawBigPixel :: MyColor -> Int -> Int -> Int -> Int -> IO ()
-drawBigPixel (MyColor r g b a) x y w h = do
-                                            let
-                                                scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
-                                                toFloat    v = (fromIntegral (v :: Int) :: Float)
-                                                x1 = (((toFloat x) / (toFloat w) * 2) - 1)
-                                                x2 = x1 + pixelSize
-                                                y1 = (((toFloat y) / (toFloat h) * 2) - 1)
-                                                y2 = y1 + pixelSize
-                                            color  $ Color4 (scaleColor r)
-                                                            (scaleColor g)
-                                                            (scaleColor b)
-                                                            a
-                                            vertex $ Vertex2 x1 y1
-                                            vertex $ Vertex2 x2 y1
-                                            vertex $ Vertex2 x2 y2
-                                            vertex $ Vertex2 x1 y2
+drawBigPixel :: (MyColor, MyPoint) -> Int -> Int -> IO ()
+drawBigPixel ((MyColor r g b a),(MyPoint x y))
+             w
+             h = do
+                    let
+                        scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
+                        toFloat    v = (fromIntegral (v :: Int) :: Float)
+                        x1 = (((toFloat x) / (toFloat w) * 2) - 1)
+                        x2 = x1 + pixelSize
+                        y1 = (((toFloat y) / (toFloat h) * 2) - 1)
+                        y2 = y1 + pixelSize
+                    color  $ Color4 (scaleColor r)
+                                    (scaleColor g)
+                                    (scaleColor b)
+                                    a
+                    vertex $ Vertex2 x1 y1
+                    vertex $ Vertex2 x2 y1
+                    vertex $ Vertex2 x2 y2
+                    vertex $ Vertex2 x1 y2
                                                                  
                                 
                                                                                 
@@ -99,13 +101,19 @@ blueRotate (MyImage pixels w h) v = MyImage (map (\(MyColor r g b a) -> (MyColor
                 rotate b v = (b + (v * 2)) `mod` 256 
 
                                                             
-                                                            
-                                                            
+                     
+data Displayable = Displayable [(MyColor, MyPoint)] Int Int
+
+toDisplayable :: MyImage -> Displayable
+toDisplayable (MyImage colors w h) = Displayable (zip colors 
+                                                      [MyPoint x y | x <- [0..(w-1)], y <- [0..(h-1)]])
+                                                  w h
+                                 
                                                             
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
-blankImage w h = [MyColor 256 256 256 1 | _ <- w , _ <- h]
+blankImage w h = MyImage [MyColor 256 256 256 1 | _ <- [0..(w-1)] , _ <- [0..(h-1)]] w h
 
 gradientImage :: MyImage -> MyImage
 gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
