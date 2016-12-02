@@ -1,6 +1,7 @@
 import Codec.Picture.Saving
 import qualified Codec.Picture as J
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as Bl
 import qualified Data.Vector.Storable as V
 import Data.Word
 
@@ -35,16 +36,56 @@ fromPng path = do
                     toInt w = (fromIntegral (w :: Word8) :: Int)
                 file <- B.readFile path                 -- file   :: ByteString
                 let (Right result) = J.decodePng file   -- result :: DynamicImage
-                return (makeImage result)
+                return (makeImage result)   
 
 
 toPng :: FilePath -> MyImage -> IO ()
 toPng path image = do
                     let
-                        toJImage :: MyImage -> J.DynamicImage
-                        toJImage (MyImage pairs w h) = J.Image w h (V.fromList (map (\p -> toJPixel (fst p)) pairs)) -- Only want the pixels themselves
+                        toJImage :: MyImage -> J.Image J.PixelRGBA8
+                        toJImage (MyImage pairs w h) = J.ImageRGBA8 (J.Image w h (V.fromList (map (\p -> toJPixel (fst p)) pairs))) -- Only want the pixels themselves
                         toJPixel :: MyColor -> J.PixelRGBA8
-                        toJPixel (MyColor r g b a) = J.PixelRGBA8 r g b a
+                        toJPixel (MyColor r g b a) = J.PixelRGBA8 (toWord8 r)
+                                                                  (toWord8 g)
+                                                                  (toWord8 b)
+                                                                  (toWord8 a)
                         toWord8 i = (fromIntegral (i :: Int) :: Word8)
                     let bytestring = J.encodePng (toJImage image)
-                    writeFile path bytestring
+                    Bl.writeFile path bytestring
+
+
+--
+                        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
