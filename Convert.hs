@@ -19,6 +19,9 @@ instance Show MyColor where
                              
 data MyImage = MyImage [(MyColor, MyPoint)] Int Int 
 
+imageMap :: (MyColor -> MyColor) -> MyImage -> MyImage
+imageMap f (MyImage pairs w h) = MyImage (map (\(color, point) -> ((f color), point)) pairs) w h
+
 
 fromPng :: FilePath -> IO MyImage
 fromPng path = do
