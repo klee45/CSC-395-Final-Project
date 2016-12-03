@@ -6,9 +6,9 @@ import Graphics.UI.GLUT
 import Data.IORef
 import Codec.Picture.Saving
 import qualified Codec.Picture as J
-import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as B
 import qualified Data.Vector.Storable as V
-
+import Data.Word
 
 
 {-- TODO
@@ -18,17 +18,43 @@ Finish conversion from our images to pngs through juicypixels
 Remove / rename pixel to remove x y location and instead fill entire rect
     or edit conversion to fill remaining elements with transparent
 
---}
+-}
 
-{---------------------------   Convert to Codec Image and PNG   -------------------}
+{-
+    File reading, writing, and helpers
+-}
 
-convertToPng :: MyImage -> B.ByteString
-convertToPng image = J.encodePng (toJImage image)
-    where
-        toJImage :: MyImage -> J.Image J.PixelRGBA8 -- ImageRGBA (Image PixelRGBA8)
-        toJImage (MyImage pixels w h) = J.Image w h (V.fromList (map toPixelBase pixels))
-        toPixelBase :: MyColor -> J.PixelBaseComponent J.PixelRGBA8 -- (even A layer is 0-255)
-        toPixelBase (MyColor r g b a) = undefined
+fromPng :: FilePath -> IO MyImage
+fromPng path = do
+                let
+                    makeImage :: J.DynamicImage -> MyImage
+                    makeImage (J.ImageRGBA8 image@(J.Image w h _)) = convertPixels image w h
+                    makeImage _ = blankImage 1 1
+                    convertPixels pixels w h = MyImage (zip (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points) points) w h
+                                            where
+                                                points = [(MyPoint x y) | x <- [0..w-1], y <- [0..h-1]]
+                    pixelToColor ::  J.PixelRGBA8 -> MyColor
+                    pixelToColor (J.PixelRGBA8 r g b a) = MyColor (toInt r)
+                                                                  (toInt g)
+                                                                  (toInt b)
+                                                                  (alphaConvert a)
+                    toInt w = (fromIntegral (w :: Word8) :: Int)
+                    alphaConvert w = (fromIntegral (w :: Word8) :: Double) / 256
+
+                file <- B.readFile path                 -- file   :: ByteString
+                let (Right result) = J.decodePng file   -- result :: DynamicImage
+                return (makeImage result)
+
+
+
+
+                
+{--------------------------- Loading some examples -------------------------------}
+
+example = fromPng "Sprites/MarioSmall.png"
+
+displayAlpha :: IO MyImage -> IO ()
+displayAlpha ioimg = undefined
 
 
 
@@ -39,13 +65,15 @@ convertToPng image = J.encodePng (toJImage image)
 
 main :: IO ()
 main = do
-  (_progName, _args) <- getArgsAndInitialize
-  _window <- createWindow "Test"
-  iter <- newIORef 1
-  displayCallback $= display iter
-  reshapeCallback $= Just reshape
-  idleCallback $= Just (idle iter)
-  mainLoop
+          (_progName, _args) <- getArgsAndInitialize
+          initialDisplayMode $= [RGBAMode, 
+                                 WithAlphaComponent]
+          _window <- createWindow "Test"
+          iter <- newIORef 1
+          displayCallback $= display iter
+          reshapeCallback $= Just reshape
+          idleCallback $= Just (idle iter)  
+          mainLoop
   
 reshape :: ReshapeCallback
 reshape size = do
@@ -61,67 +89,84 @@ display :: IORef Int -> DisplayCallback
 display iter = do
   clear [ ColorBuffer ]       -- clears canvas?
   a <- get iter
-  draw (toDisplayable (blueRotate (gradientImage (blankImage 25 25)) a))  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
+  img <- example
+  drawCanvas
+  draw (blueRotate img a)  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
   flush                       -- Sends openGL commands to graphics for display
 
-draw :: Displayable -> IO ()
-draw (Displayable pixels w h) = do
-                                    renderPrimitive Quads $
-                                        mapM_ (\point -> drawBigPixel point w h) pixels
-                                
-pixelSize = 0.05
+draw :: MyImage -> IO ()
+draw (MyImage pixels w h) = do
+                                renderPrimitive Quads $
+                                    mapM_ (\point -> drawBigPixel point w h) pixels
                                                                              
 drawBigPixel :: (MyColor, MyPoint) -> Int -> Int -> IO ()
 drawBigPixel ((MyColor r g b a),(MyPoint x y))
              w
              h = do
                     let
-                        scaleColor c = (fromIntegral (c :: Int) :: Double) / 256
-                        toFloat    v = (fromIntegral (v :: Int) :: Float)
+                        pixelWidth  = 2.0 / (toFloat w)
+                        pixelHeight = 2.0 / (toFloat h)
+                        scaleColor c = (fromIntegral (c :: Int) :: GLdouble) / 256
+                        toFloat    v = (fromIntegral (v :: Int) :: GLdouble)
                         x1 = (((toFloat x) / (toFloat w) * 2) - 1)
-                        x2 = x1 + pixelSize
-                        y1 = (((toFloat y) / (toFloat h) * 2) - 1)
-                        y2 = y1 + pixelSize
-                    color  $ Color4 (scaleColor r)
-                                    (scaleColor g)
-                                    (scaleColor b)
-                                    a
+                        x2 = x1 + pixelWidth
+                        -- For some reason the juicypixels people made it so the top left
+                        -- is the origin instead of the standard of having the bottom left
+                        -- It could be backwards I'm too lazy to check.
+                        y1 = (((toFloat (h - y)) / (toFloat h) * 2) - 1)
+                        y2 = y1 - pixelHeight 
+                    color (Color4 (scaleColor r)
+                                  (scaleColor g)
+                                  (scaleColor b)
+                                  a :: Color4 GLdouble)
                     vertex $ Vertex2 x1 y1
                     vertex $ Vertex2 x2 y1
                     vertex $ Vertex2 x2 y2
                     vertex $ Vertex2 x1 y2
                                                                  
-                                
-                                                                                
+drawCanvas :: IO ()
+drawCanvas = do
+                let -- Just pretend this isn't here
+                    l :: GLdouble
+                    l = -1.0;
+                    r :: GLdouble
+                    r = 1.0
+                color (Color4 1.0 1.0 1.0 1.0 :: Color4 GLdouble)
+                renderPrimitive Quads $ mapM_ vertex [
+                    Vertex2 l l,
+                    Vertex2 r l,
+                    Vertex2 r r,
+                    Vertex2 l r]                                      
                                                                              
 blueRotate :: MyImage -> Int -> MyImage
-blueRotate (MyImage pixels w h) v = MyImage (map (\(MyColor r g b a) -> (MyColor r g (rotate b v) a)) pixels)
+blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels)
                                        w h
             where
                 rotate b v = (b + (v * 2)) `mod` 256 
 
                                                             
-                     
+{-                     
 data Displayable = Displayable [(MyColor, MyPoint)] Int Int
 
 toDisplayable :: MyImage -> Displayable
 toDisplayable (MyImage colors w h) = Displayable (zip colors 
                                                       [MyPoint x y | x <- [0..(w-1)], y <- [0..(h-1)]])
                                                   w h
-                                 
+-}                                 
                                                             
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
-blankImage w h = MyImage [MyColor 256 256 256 1 | _ <- [0..(w-1)] , _ <- [0..(h-1)]] w h
+blankImage w h = MyImage [((MyColor 256 256 256 1), (MyPoint x y)) | x <- [0..(w-1)] , y <- [0..(h-1)]] w h
 
 gradientImage :: MyImage -> MyImage
 gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
               where
-                changePixel _ = MyColor (round (((toFloat x) / (toFloat w)) * 256))
-                                        (round (((toFloat y) / (toFloat h)) * 256))
-                                        128    
-                                        1
+                changePixel (_, point@(MyPoint x y)) = ((MyColor (round (((toFloat x) / (toFloat w)) * 256))
+                                                                 (round (((toFloat y) / (toFloat h)) * 256))
+                                                                 128    
+                                                                 1),
+                                                        point)
                 toFloat v = (fromIntegral (v :: Int) :: Float)
 
 
@@ -161,10 +206,10 @@ mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
 -- MyImage contains a list of MyPixels
 -- and an integer describing its width
 -- and one for its height
-data MyImage = MyImage [MyColor] Int Int 
+data MyImage = MyImage [(MyColor, MyPoint)] Int Int 
 
 imageMap :: (MyColor -> MyColor) -> MyImage -> MyImage
-imageMap f (MyImage pixels h w) = MyImage (map f pixels) h w
+imageMap f (MyImage pairs w h) = MyImage (map (\(color, point) -> ((f color), point)) pairs) w h
 
 
 -- Maintains speed of animation as number of loops per frame
