@@ -9,7 +9,7 @@ data MyPoint = MyPoint Int Int
 data MyColor = MyColor { red     :: Int 
                        , green   :: Int 
                        , blue    :: Int
-                       , opacity :: Int }
+                       , opacity :: Double }
 
 instance Show MyColor where
     show (MyColor r g b a) = "("  ++ show r ++ 
@@ -28,6 +28,7 @@ fromPng path = do
                 let
                     makeImage :: J.DynamicImage -> MyImage
                     makeImage (J.ImageRGBA8 image@(J.Image w h _)) = convertPixels image w h
+                    makeImage _ = blankImage 1 1
                     convertPixels pixels w h = MyImage (zip (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points) points) w h
                                             where
                                                 points = [(MyPoint x y) | x <- [0..w-1], y <- [0..h-1]]
@@ -35,12 +36,16 @@ fromPng path = do
                     pixelToColor (J.PixelRGBA8 r g b a) = MyColor (toInt r)
                                                                   (toInt g)
                                                                   (toInt b)
-                                                                  (toInt a)
+                                                                  (alphaConvert a)
                     toInt w = (fromIntegral (w :: Word8) :: Int)
+                    alphaConvert w = (fromIntegral (w :: Word8) :: Double) / 256
+
                 file <- B.readFile path                 -- file   :: ByteString
                 let (Right result) = J.decodePng file   -- result :: DynamicImage
-                return (makeImage result)   
+                return (makeImage result)
 
+blankImage :: Int -> Int -> MyImage
+blankImage w h = MyImage [((MyColor 256 256 256 1), (MyPoint x y)) | x <- [0..(w-1)] , y <- [0..(h-1)]] w h
 
 toPng :: FilePath -> MyImage -> IO ()
 toPng path image = do
@@ -51,7 +56,7 @@ toPng path image = do
                         toJPixel (MyColor r g b a) = J.PixelRGBA8 (toWord8 r)
                                                                   (toWord8 g)
                                                                   (toWord8 b)
-                                                                  (toWord8 a)
+                                                                  (fromIntegral ((a * 256) :: Double) :: Word8)
                         toWord8 i = (fromIntegral (i :: Int) :: Word8)
                     let bytestring = J.encodePng (toJImage image)
                     Bl.writeFile path bytestring

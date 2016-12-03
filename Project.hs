@@ -98,8 +98,14 @@ draw :: MyImage -> IO ()
 draw (MyImage pixels w h) = do
                                 renderPrimitive Quads $
                                     mapM_ (\point -> drawBigPixel point w h) pixels
-                                                                             
+
+                                    
+{-  Currently I have no idea how we can get alpha working
+    the workaround is to not display the elements with
+    0 alpha
+-}    
 drawBigPixel :: (MyColor, MyPoint) -> Int -> Int -> IO ()
+drawBigPixel ((MyColor _ _ _ 0), _) w h = return ()
 drawBigPixel ((MyColor r g b a),(MyPoint x y))
              w
              h = do
@@ -114,7 +120,7 @@ drawBigPixel ((MyColor r g b a),(MyPoint x y))
                         -- is the origin instead of the standard of having the bottom left
                         -- It could be backwards I'm too lazy to check.
                         y1 = (((toFloat (h - y)) / (toFloat h) * 2) - 1)
-                        y2 = y1 - pixelHeight 
+                        y2 = y1 - pixelHeight
                     color (Color4 (scaleColor r)
                                   (scaleColor g)
                                   (scaleColor b)
@@ -127,16 +133,16 @@ drawBigPixel ((MyColor r g b a),(MyPoint x y))
 drawCanvas :: IO ()
 drawCanvas = do
                 let -- Just pretend this isn't here
-                    l :: GLdouble
-                    l = -1.0;
-                    r :: GLdouble
-                    r = 1.0
+                    n :: GLdouble
+                    n = -1.0;
+                    p :: GLdouble
+                    p = 1.0
                 color (Color4 1.0 1.0 1.0 1.0 :: Color4 GLdouble)
                 renderPrimitive Quads $ mapM_ vertex [
-                    Vertex2 l l,
-                    Vertex2 r l,
-                    Vertex2 r r,
-                    Vertex2 l r]                                      
+                    Vertex2 n n,
+                    Vertex2 p n,
+                    Vertex2 p p,
+                    Vertex2 n p]                                      
                                                                              
 blueRotate :: MyImage -> Int -> MyImage
 blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels)
