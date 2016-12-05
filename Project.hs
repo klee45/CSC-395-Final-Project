@@ -51,12 +51,18 @@ fromPng path = do
                 
 {--------------------------- Loading some examples -------------------------------}
 
-example = fromPng "Sprites/MarioSmall.png"
+example = fromPng "Sprites/MarioSmall_1.png"
 
 displayAlpha :: IO MyImage -> IO ()
 displayAlpha ioimg = undefined
 
-
+exT1 img = (imageMap (\c -> replaceColor 50
+                                         c
+                                         (MyColor 184 64 64 1)
+                                         (MyColor 0 0 255 1))
+                     img)
+exT2 img = (imageMap (\c -> addColor c (-20) 20 0) img)
+exT3 img = (imageMap invertColor img)
 
 {----------------------------------  Main and Display ----------------------------}
 
@@ -66,9 +72,11 @@ displayAlpha ioimg = undefined
 main :: IO ()
 main = do
           (_progName, _args) <- getArgsAndInitialize
-          initialDisplayMode $= [RGBAMode, 
-                                 WithAlphaComponent]
+--          initialDisplayMode $= [RGBAMode, 
+--                                 WithAlphaComponent]
           _window <- createWindow "Test"
+          blend $= Enabled
+          blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
           iter <- newIORef 1
           displayCallback $= display iter
           reshapeCallback $= Just reshape
@@ -91,7 +99,7 @@ display iter = do
   a <- get iter
   img <- example
   drawCanvas
-  draw (blueRotate img a)  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
+  draw (exT1 (exT2 (exT3 img)))  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
   flush                       -- Sends openGL commands to graphics for display
 
 draw :: MyImage -> IO ()
@@ -105,7 +113,6 @@ draw (MyImage pixels w h) = do
     0 alpha
 -}    
 drawBigPixel :: (MyColor, MyPoint) -> Int -> Int -> IO ()
-drawBigPixel ((MyColor _ _ _ 0), _) w h = return ()
 drawBigPixel ((MyColor r g b a),(MyPoint x y))
              w
              h = do
@@ -204,8 +211,17 @@ mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
                           a >= 0 && a <= 1)
                          $ MyColor r g b a
 
-                         
-                         
+mkColorBounded :: Int -> Int -> Int -> Double -> MyColor
+mkColorBounded r g b a = mkColor (bound r) (bound g) (bound b) (bounda a)
+    where
+        bound i
+            | i < 0     = 0
+            | i > 255   = 255
+            | otherwise = i
+        bounda a
+            | a < 0.0   = 0.0
+            | a > 1.0   = 1.0
+            | otherwise = a
                          
 {----------------------------    Images and Animations     ---------------------------}
 
@@ -231,13 +247,48 @@ animationMap f (Animation images frames) = Animation (map f images) frames
 
 
 
+{---------------------------------- Functions --------------------------------------}
+
+-- Split horizontally
+-- If n doesn't make sense or the image can't be split,
+-- returns the same image
+splitH :: MyImage -> Int -> [MyImage]
+splitH image@(MyImage pairs w h) n
+    | n <= 1           = [image]
+    | (w `mod` n) /= 0 = [image] -- Why 'not equals' is written as '/=' in haskell makes no sense
+    | otherwise        = undefined
+    where
+        temp = [[0..(w `div` n)]]
+
+-- Split Vertically
+splitV :: MyImage -> Int -> [MyImage]
+splitV i 0 = [i]
+splitV i 1 = [i]
+splitV image@(MyImage pairs w h) n
+    | n <= 1           = [image]
+    | (h `mod` n) /= 0 = [image]
+    | otherwise        = undefined
+    where
+        temp = [[0..(h `div` n)]]
 
 
+        
+        
+--
+replaceColor :: Int -> MyColor -> MyColor -> MyColor -> MyColor
+replaceColor m old@(MyColor r g b a) compare@(MyColor r' g' b' a') new
+    | withinR && withinG && withinB = new
+    | otherwise                     = old
+    where
+        withinR = (abs (r' - r)) <= m
+        withinG = (abs (g' - g)) <= m
+        withinB = (abs (b' - b)) <= m
 
+addColor :: MyColor -> Int -> Int -> Int -> MyColor
+addColor (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
 
-
-
-
+invertColor :: MyColor -> MyColor
+invertColor (MyColor r g b a) = mkColorBounded (255 - r) (255 - g) (255 - b) a
 
 
 
