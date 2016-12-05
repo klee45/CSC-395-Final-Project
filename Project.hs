@@ -51,18 +51,18 @@ fromPng path = do
                 
 {--------------------------- Loading some examples -------------------------------}
 
-example = fromPng "Sprites/MarioSmall_1.png"
+exampleRaw    = fromPng "Sprites/MarioSmall_1.png"
+backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 
-displayAlpha :: IO MyImage -> IO ()
-displayAlpha ioimg = undefined
+exF1 img = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1) img
+exF2 img = imageMap (\c -> colorAdd c (-20) 20 0) img
+exF3 img = imageInvert img
 
-exT1 img = (imageMap (\c -> replaceColor 50
-                                         c
-                                         (MyColor 184 64 64 1)
-                                         (MyColor 0 0 255 1))
-                     img)
-exT2 img = (imageMap (\c -> addColor c (-20) 20 0) img)
-exT3 img = (imageMap invertColor img)
+example    = toDrawable (do
+                            img <- exampleRaw
+                            return (exF3 (exF2 (exF1 img))))
+                        0 0 0.15 0.2
+background = toDrawable backgroundRaw 0 0 1.0 1.0
 
 {----------------------------------  Main and Display ----------------------------}
 
@@ -72,11 +72,11 @@ exT3 img = (imageMap invertColor img)
 main :: IO ()
 main = do
           (_progName, _args) <- getArgsAndInitialize
---          initialDisplayMode $= [RGBAMode, 
---                                 WithAlphaComponent]
+          initialWindowSize $= Size 640 480
           _window <- createWindow "Test"
           blend $= Enabled
           blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
+          viewport $= (Position 0 0, Size (fromIntegral 100) (fromIntegral 100))
           iter <- newIORef 1
           displayCallback $= display iter
           reshapeCallback $= Just reshape
@@ -91,60 +91,38 @@ reshape size = do
 idle :: IORef Int -> IdleCallback
 idle iter = do
   iter $~! (+ 1)
-  postRedisplay Nothing
+  postRedisplay Nothing 
 
 display :: IORef Int -> DisplayCallback
 display iter = do
   clear [ ColorBuffer ]       -- clears canvas?
   a <- get iter
-  img <- example
-  drawCanvas
-  draw (exT1 (exT2 (exT3 img)))  -- Converts points to an MyImage 500 x 500 (points must be in range 0 - 500)
+  i1 <- background
+  i2 <- example
+  draw i1
+  draw i2
   flush                       -- Sends openGL commands to graphics for display
 
-draw :: MyImage -> IO ()
-draw (MyImage pixels w h) = do
-                                renderPrimitive Quads $
-                                    mapM_ (\point -> drawBigPixel point w h) pixels
+draw :: Drawable -> IO ()
+draw (Drawable triplet w h) = do
+                                mapM_ (\(pixelColor, v1, v2) -> do
+                                                                    color pixelColor
+                                                                    rect v1 v2)
+                                      triplet
 
-                                    
-{-  Currently I have no idea how we can get alpha working
-    the workaround is to not display the elements with
-    0 alpha
--}    
-drawBigPixel :: (MyColor, MyPoint) -> Int -> Int -> IO ()
-drawBigPixel ((MyColor r g b a),(MyPoint x y))
-             w
-             h = do
-                    let
-                        pixelWidth  = 2.0 / (toFloat w)
-                        pixelHeight = 2.0 / (toFloat h)
-                        scaleColor c = (fromIntegral (c :: Int) :: GLdouble) / 256
-                        toFloat    v = (fromIntegral (v :: Int) :: GLdouble)
-                        x1 = (((toFloat x) / (toFloat w) * 2) - 1)
-                        x2 = x1 + pixelWidth
-                        -- For some reason the juicypixels people made it so the top left
-                        -- is the origin instead of the standard of having the bottom left
-                        -- It could be backwards I'm too lazy to check.
-                        y1 = (((toFloat (h - y)) / (toFloat h) * 2) - 1)
-                        y2 = y1 - pixelHeight
-                    color (Color4 (scaleColor r)
-                                  (scaleColor g)
-                                  (scaleColor b)
-                                  a :: Color4 GLdouble)
-                    vertex $ Vertex2 x1 y1
-                    vertex $ Vertex2 x2 y1
-                    vertex $ Vertex2 x2 y2
-                    vertex $ Vertex2 x1 y2
-                                                                 
+drawBigPixel :: (Color4 Double, Vertex2 Double, Vertex2 Double) -> IO ()
+drawBigPixel (pixelColor, v1, v2) = do
+                                    color pixelColor
+                                    rect v1 v2
+                 
 drawCanvas :: IO ()
 drawCanvas = do
                 let -- Just pretend this isn't here
-                    n :: GLdouble
+                    n :: Double
                     n = -1.0;
-                    p :: GLdouble
+                    p :: Double
                     p = 1.0
-                color (Color4 1.0 1.0 1.0 1.0 :: Color4 GLdouble)
+                color (Color4 1.0 1.0 1.0 1.0 :: Color4 Double)
                 renderPrimitive Quads $ mapM_ vertex [
                     Vertex2 n n,
                     Vertex2 p n,
@@ -156,16 +134,7 @@ blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) ->
                                        w h
             where
                 rotate b v = (b + (v * 2)) `mod` 256 
-
-                                                            
-{-                     
-data Displayable = Displayable [(MyColor, MyPoint)] Int Int
-
-toDisplayable :: MyImage -> Displayable
-toDisplayable (MyImage colors w h) = Displayable (zip colors 
-                                                      [MyPoint x y | x <- [0..(w-1)], y <- [0..(h-1)]])
-                                                  w h
--}                                 
+                          
                                                             
 {-----------------------------   Library Functions   -------------------------}
 
@@ -235,19 +204,52 @@ imageMap f (MyImage pairs w h) = MyImage (map (\(color, point) -> ((f color), po
 
 
 -- Maintains speed of animation as number of loops per frame
-data Animation = Animation [MyImage] Int
+data Animation = Animation [Drawable] Int
 
-getFrame :: Animation -> Int -> MyImage
+getFrame :: Animation -> Int -> Drawable
 getFrame (Animation imgs _) frame = (!!) imgs (frame `mod` (length imgs))
 
-animationMap :: (MyImage -> MyImage) -> Animation -> Animation
+animationMap :: (Drawable -> Drawable) -> Animation -> Animation
 animationMap f (Animation images frames) = Animation (map f images) frames
 
 
+{------------------------------ Drawable --------------------------------------------------}
+{-
+    Pre-processing for faster drawing. Definition is nearly identical to MyImage, 
+    but with a data declaration and a hidden constructor, we can ensure that images are
+    pre-processed before drawing.
+    
+    Also this looks really really ugly and I think some parts aren't necessary
+-}
+data Drawable = Drawable [(Color4 Double, Vertex2 Double, Vertex2 Double)] Int Int
 
+toDrawable :: IO MyImage -> Int -> Int -> Double -> Double -> IO Drawable
+toDrawable ioImg x y w h = do
+                            res <- ioImg
+                            let (MyImage pairs imgW imgH) = res
+                                toDouble  v = (fromIntegral (v :: Int) :: Double)
+                                pixelWidth  = 2.0 / (toDouble imgW) * w
+                                pixelHeight = 2.0 / (toDouble imgH) * h
+                                scaleColor c = (toDouble c) / 256
+                                helper ((MyColor r g b a), (MyPoint px py)) = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)    
+                                    where
+                                        x1 = (((toDouble (px + x)) / (toDouble imgW) * 2 * w) - 1)
+                                        x2 = x1 + pixelWidth
+                                        -- For some reason the juicypixels people made it so the top left
+                                        -- is the origin instead of the standard of having the bottom left
+                                        -- It could be backwards I'm too lazy to check.
+                                        y1 = (((toDouble (imgH - py + y)) / (toDouble imgH) * 2 * h) - 1)
+                                        y2 = y1 - pixelHeight
+                                        newColor = (Color4 (scaleColor r)
+                                                           (scaleColor g)
+                                                           (scaleColor b)
+                                                           a)
+                            return $ Drawable (map helper pairs) imgW imgH
+            
+{-------------------------------------------- Functions ------------------------------------------------}
 
+{-------------------------------------------- Image Functions ------------------------------------------}
 
-{---------------------------------- Functions --------------------------------------}
 
 -- Split horizontally
 -- If n doesn't make sense or the image can't be split,
@@ -271,95 +273,38 @@ splitV image@(MyImage pairs w h) n
     where
         temp = [[0..(h `div` n)]]
 
+        
+        
 
-        
-        
---
-replaceColor :: Int -> MyColor -> MyColor -> MyColor -> MyColor
-replaceColor m old@(MyColor r g b a) compare@(MyColor r' g' b' a') new
-    | withinR && withinG && withinB = new
-    | otherwise                     = old
+imageReplaceColor :: Int -> MyColor -> MyColor -> MyImage -> MyImage
+imageReplaceColor m compare@(MyColor r' g' b' _) new image = imageMap helper image
     where
-        withinR = (abs (r' - r)) <= m
-        withinG = (abs (g' - g)) <= m
-        withinB = (abs (b' - b)) <= m
+        helper old@(MyColor r g b a)
+            | withinR && withinG && withinB = new
+            | otherwise                     = old 
+            where
+                withinR = (abs (r' - r)) <= m
+                withinG = (abs (g' - g)) <= m
+                withinB = (abs (b' - b)) <= m
 
-addColor :: MyColor -> Int -> Int -> Int -> MyColor
-addColor (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
+imageInvert :: MyImage -> MyImage
+imageInvert image = imageMap (\(MyColor r g b a) -> mkColorBounded (255 - r) (255 - g) (255 - b) a) image
 
-invertColor :: MyColor -> MyColor
-invertColor (MyColor r g b a) = mkColorBounded (255 - r) (255 - g) (255 - b) a
+imageGrayscale :: MyImage -> MyImage
+imageGrayscale image = imageMap helper image
+    where
+        helper (MyColor r g b a) = mkColorBounded l l l a
+            where
+                l = round ((times 0.2126 r) + (times 0.7152 g) + (times 0.0722 b))
+                times dbl v = dbl * (fromIntegral (v :: Int) :: Double)
 
-
-
-
-
-{-
-
-
---- Helper function applications
-
-applyRed :: (Int -> Int) -> MyPixel -> MyPixel
-applyRed f (MyPixel r g b a) = MyPixel (f r) g b a
-
-applyGreen :: (Int -> Int) -> MyPixel -> MyPixel
-applyGreen f (MyPixel r g b a) = MyPixel r (f g) b a
-
-applyBlue :: (Int -> Int) -> MyPixel -> MyPixel
-applyBlue f (MyPixel r g b a) = MyPixel r g (f b) a
-
-applyOpac :: (Double -> Double) -> MyPixel -> MyPixel
-applyOpac f (MyPixel r g b a) = MyPixel r g b (f a)
+{------------------------------------------------ Individual Color Functions -----------------------------}
 
 
-
---- Helper MyPixel mappings onto images
-
-redMap :: (Int -> Int) -> MyImage -> MyImage
-redMap f = imageMap (\c -> applyRed f c)
-
-greenMap :: (Int -> Int) -> MyImage -> MyImage
-greenMap f = imageMap (\c -> applyGreen f c)
-
-blueMap :: (Int -> Int) -> MyImage -> MyImage
-blueMap f = imageMap (\c -> applyBlue f c)
- 
-opacMap :: (Double -> Double) -> MyImage -> MyImage
-opacMap f = imageMap (\c -> applyOpac f c)
+colorAdd :: MyColor -> Int -> Int -> Int -> MyColor
+colorAdd (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
 
 
-
---- Shift MyPixels
-
-shiftMyPixel :: Int -> Int -> Int
-shiftMyPixel val change
-                    | res > 255 = 255
-                    | res < 0   = 0
-                    | otherwise = res
-                    where
-                        res = val + change
-
-shiftOpac :: Double -> Double -> Double
-shiftOpac val change
-                    | res >= 1  = 1
-                    | res <= 0  = 0
-                    | otherwise = res
-                    where
-                        res = val + change
-
--- Shifting example
-    
-plusFiveRed :: MyImage -> MyImage
-plusFiveRed = redMap (\v -> shiftMyPixel 5 v)
-
-
-
-
-
-
-
-
--}
 
 
 
