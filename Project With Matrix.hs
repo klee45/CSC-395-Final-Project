@@ -212,7 +212,7 @@ mkColorBounded r g b a = mkColor (bound r) (bound g) (bound b) (bounda a)
 -- MyImage contains a list of MyPixels
 -- and an integer describing its width
 -- and one for its height
-data MyImage = MyImage [(MyColor, MyPoint)] Int Int 
+data MyImage = MyImage (Matrix MyColor) Int Int 
 
 imageMap :: (MyColor -> MyColor) -> MyImage -> MyImage
 imageMap f (MyImage pairs w h) = MyImage (map (\(color, point) -> ((f color), point)) pairs) w h
@@ -241,7 +241,7 @@ mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y h w)) image
 data Drawable = Drawable [(Color4 Double, Vertex2 Double, Vertex2 Double)] Int Int
 
 toDrawable :: MyImage -> Int -> Int -> Double -> Double -> Drawable
-toDrawable (MyImage pairs imgW imgH) x y w h = Drawable (map helper pairs) imgW imgH
+toDrawable (MyImage matrix imgW imgH) x y w h = Drawable (map helper matrix) imgW imgH
     where
         toDouble  v = (fromIntegral (v :: Int) :: Double)
         pixelWidth  = 2.0 / (toDouble imgW) * w
