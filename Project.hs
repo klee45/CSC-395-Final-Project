@@ -31,9 +31,9 @@ fromPng path = do
                     makeImage :: J.DynamicImage -> MyImage
                     makeImage (J.ImageRGBA8 image@(J.Image w h _)) = convertPixels image w h
                     makeImage _ = blankImage 1 1
-                    convertPixels pixels w h = MyImage (M.fromList w h (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points))
+                    convertPixels pixels w h = MyImage (M.fromList h w (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points))
                                             where
-                                                points = [(MyPoint x y) | x <- [0..w-1], y <- [0..h-1]]
+                                                points = [(MyPoint x y) | y <- [0..h-1], x <- [0..w-1]]
                     pixelToColor ::  J.PixelRGBA8 -> MyColor
                     pixelToColor (J.PixelRGBA8 r g b a) = MyColor (toInt r)
                                                                   (toInt g)
@@ -60,17 +60,20 @@ exF1 = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
 exF2 = imageMap (\c -> colorAdd c (-20) 20 0)
 exF3 = imageInvert
 
+-- Expand image 5 pixels on all sides with transparent pixels
+exF4 = imageExpandBorders (MyColor 0 0 0 0) 5 5 5 5
+
 exA1 ani = (animationBlink ani 9)
 
 example1    = do 
                 img <- exampleRaw1
-                return $ toDrawable (exF3 (exF2 (exF1 img)))
-                                    0 0 0.15 0.2
+                return $ toDrawable (exF4 (exF3 (exF2 (exF1 img))))
+                                    5 5 0.25 0.30
                                     
 example2    = do
                 img <- exampleRaw2
                 return $ mkAnimation (animationBlink img 17)
-                                     15 0 0.40 0.2
+                                     25 0 0.5 0.2
                                     
 background = do img <- backgroundRaw 
                 return $ toDrawable img 0 0 1.0 1.0
@@ -111,6 +114,7 @@ display iter = do
   i1 <- background
   i2 <- example1
   a1 <- example2
+  --drawCanvas
   --draw i1
   draw i2
   drawAnimation a1 a
@@ -128,8 +132,8 @@ drawAnimation animation frame = draw (getFrame animation frame)
 
 drawBigPixel :: (Color4 Double, Vertex2 Double, Vertex2 Double) -> IO ()
 drawBigPixel (pixelColor, v1, v2) = do
-                                    color pixelColor
-                                    rect v1 v2
+                                        color pixelColor
+                                        rect v1 v2
                  
 drawCanvas :: IO ()
 drawCanvas = do
@@ -155,7 +159,7 @@ blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) ->
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
-blankImage w h = MyImage $ M.fromList w h (replicate (w * h) (MyColor 256 256 256 1))
+blankImage w h = MyImage $ M.fromList h w (replicate (w * h) (MyColor 256 256 256 1))
 
 {-
 gradientImage :: MyImage -> MyImage
@@ -209,7 +213,7 @@ mkColorBounded r g b a = mkColor (bound r) (bound g) (bound b) (bounda a)
             | a > 1.0   = 1.0
             | otherwise = a
                          
-{----------------------------    Images and Animations     ---------------------------}
+{----------------------------    Images and Matrices     ---------------------------}
 
 -- MyImage contains a list of MyPixels
 -- and an integer describing its width
@@ -223,19 +227,43 @@ imageMapXY :: (MyColor -> Int -> Int -> MyColor) -> MyImage -> MyImage
 imageMapXY f (MyImage matrix) = MyImage (matrixMapXY f matrix);
 
 matrixMap :: (a -> b) -> M.Matrix a -> M.Matrix b
-matrixMap f m = M.fromList cols rows (map f (M.toList m))
+matrixMap f m = M.fromList rows cols (map f (M.toList m))
     where
         cols = M.ncols m
         rows = M.nrows m
             
 matrixMapXY :: (a -> Int -> Int -> b) -> M.Matrix a -> M.Matrix b            
-matrixMapXY f m = M.fromList cols rows (map helper (zip (M.toList m) grid))
+matrixMapXY f m = M.fromList rows cols (map helper (zip (M.toList m) grid))
     where
-        grid = [(x,y) | x <- [1..(M.ncols m)], y <- [1..(M.nrows m)]]
+        grid = [(x,y) | y <- [1..rows], x <- [1..cols]]
         helper (v, (x, y)) = f v x y
         cols = M.ncols m
         rows = M.nrows m
 
+imageExpandBorders :: MyColor -> Int -> Int -> Int -> Int -> MyImage -> MyImage
+imageExpandBorders replace left right up down (MyImage old) = MyImage new
+    where
+        rows = M.nrows old
+        cols = M.ncols old
+        s1 = M.extendTo replace           -- Extend right and bottom border
+                        (down + rows)
+                        (right + cols)
+                        old
+        s2 = rev (tra (rev s1))           -- Reverse rows, transpose, reverse cols
+        s3 = M.extendTo replace
+                        (up + rows + down)
+                        (left + cols + right)
+                        (M.fromLists s2)
+        new = M.fromLists $ rev (tra (rev s3))
+        rev = map reverse . M.toLists
+        tra = M.transpose . M.fromLists
+
+        
+        
+        
+        
+{------------------------------ Animation --------------------------------------------------}
+        
 -- Maintains speed of animation as number of loops per frame
 data Animation = Animation [Drawable] Int
 
@@ -247,6 +275,11 @@ animationMap f (Animation images frames) = Animation (map f images) frames
 
 mkAnimation :: [MyImage] -> Int -> Int -> Double -> Double -> Animation
 mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y h w)) images) (length images)
+
+
+
+
+
 
 {------------------------------ Drawable --------------------------------------------------}
 {-
@@ -269,6 +302,7 @@ toDrawable (MyImage matrix) x y w h = Drawable (M.toList (matrixMapXY helper mat
         scaleColor c = (toDouble c) / 256
         helper (MyColor r g b a) px py = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)
             where
+                -- Not actually magic numbers
                 x1 = (((toDouble (px + x)) / (toDouble cols) * 2 * w) - 1)
                 x2 = x1 + pixelWidth
                 -- For some reason the juicypixels people made it so the top left
@@ -280,8 +314,12 @@ toDrawable (MyImage matrix) x y w h = Drawable (M.toList (matrixMapXY helper mat
                                    (scaleColor g)
                                    (scaleColor b)
                                    a)
-                                   
-{-------------------------------------------- Functions ------------------------------------------------}
+                                 
+
+
+
+                                 
+{-******************* Functions ***********************************************************************-}
 
 {-------------------------------------------- Image Functions ------------------------------------------}
 
@@ -330,7 +368,7 @@ imageInvert image = imageMap (\(MyColor r g b a) -> mkColorBounded (255 - r)
                              image
 
 imageGrayscale :: MyImage -> MyImage
-imageGrayscale image = imageMap helper matrix
+imageGrayscale image = imageMap helper image
     where
         helper (MyColor r g b a) = mkColorBounded l l l a
             where
