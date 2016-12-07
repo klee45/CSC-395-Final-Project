@@ -12,6 +12,11 @@ import Data.Word
 import qualified Data.Matrix as M
 
 
+test1 = exBoth img2 (exF4 . exF3 . exF1) (exA2 . exF4)
+
+
+
+
 {-- TODO
 
 Exporting
@@ -53,10 +58,37 @@ exColorWhite       = (MyColor 256 256 256 1)
                 
 {--------------------------- Loading some examples -------------------------------}
 
-exampleRaw1   = fromPng "Sprites/MarioSmall_1.png"
-exampleRaw2   = fromPng "Sprites/MarioBig_1.png"
+img1   = fromPng "Sprites/MarioSmall_1.png"
+img2   = fromPng "Sprites/MarioBig_1.png"
 backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 
+exImg :: IO MyImage -> (MyImage -> MyImage) -> IO ()
+exImg raw f = do
+                img <- raw
+                let image = toDrawable (f img) 5 5 0.35 0.5
+                makeWindow (return image) (return exBlankAnimation)              
+
+exAni :: IO MyImage -> (MyImage -> [MyImage]) -> IO ()
+exAni raw f = do
+                img <- raw
+                let animation = mkAnimation (f img) 5 5 0.4 0.5
+                makeWindow (return exBlankImage) (return animation)
+                
+exBoth :: IO MyImage -> (MyImage -> MyImage) -> (MyImage -> [MyImage]) -> IO ()
+exBoth raw fi fa = do
+                    img <- raw
+                    let image     = toDrawable  (fi img) 5 5 0.35 0.5
+                    let animation = mkAnimation (fa img) 5 5 0.35 0.5
+                    makeWindow (return image) (return animation)
+                       
+exBlankImage = toDrawable (transparentImage 1 1) 0 0 0.0 0.0
+exBlankAnimation = mkAnimation [(transparentImage 1 1)] 0 0 0.0 0.0
+
+                                
+colors1 = [(MyColor 255 255 50  1), (MyColor 255 150 25  1)]
+colors2 = [(MyColor 255 150 25  1), (MyColor 255 0   0   1)]
+                                
+                                
 exF1 = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
 exF2 = imageMap (\c -> colorAdd c (-20) 20 0)
 exF3 = imageInvert
@@ -65,31 +97,27 @@ exF3 = imageInvert
 exF4 = imageExpandBorders exColorTransparent 5 5 5 5
 exF5 = imageGetOutline 2
 
-exA1 = animationBlink (MyColor 256 256 256 1) 300
+exA1 = animationBlink (MyColor 256 256 256 1) 120
 
-exA2 = animationGlow [(MyColor 255 255 50  1),
-                      (MyColor 255 150 25   1)]
-                     [(MyColor 255 150 25   1),
-                      (MyColor 255 0   0   1)]
-                     17
+exA2 = animationGlow colors1 colors2 30
 
 example1 = do 
-            img <- exampleRaw1
+            img <- img1
             return $ toDrawable (exF5 (exF4 (exF3 (exF2 (exF1 img)))))
                                 5 5 0.25 0.30
                                      
 example2 = do
-            img <- exampleRaw2
+            img <- img2
             return $ mkAnimation (exA1 (exF4 img))
                                  25 5 0.6 0.4
                       
 example3 = do
-            img <- exampleRaw2
+            img <- img2
             return $ mkAnimation (exA2 (exF4 img))
                                  25 5 0.6 0.4
                                      
 example4 = do
-            img <- exampleRaw2
+            img <- img2
             let (MyImage matrix) = img
             return $ toDrawable (imageOverlay (blankImage (M.ncols matrix) (M.nrows matrix)) img)
                                 10 10 0.3 0.3        
@@ -101,19 +129,37 @@ background = do img <- backgroundRaw
 -- Main Function
 -- Yeah I have no idea what any of this does
 
+{-
 main :: IO ()
-main = do
-          (_progName, _args) <- getArgsAndInitialize
-          initialWindowSize $= Size 640 480
-          _window <- createWindow "Test"
-          blend $= Enabled
-          blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
-          viewport $= (Position 0 0, Size (fromIntegral 100) (fromIntegral 100))
-          iter <- newIORef 1
-          displayCallback $= display iter
-          reshapeCallback $= Just reshape
-          idleCallback $= Just (idle iter)  
-          mainLoop
+main i a = do
+              (_progName, _args) <- getArgsAndInitialize
+              initialWindowSize $= Size 640 480
+              _window <- createWindow "Test"
+              blend $= Enabled
+              blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
+              viewport $= (Position 0 0, Size (fromIntegral 100) (fromIntegral 100))
+              iter <- newIORef 1  
+              displayCallback $= display i a iter
+              reshapeCallback $= Just reshape
+              idleCallback $= Just (idle iter)  
+              mainLoop
+-}
+              
+makeWindow :: IO Drawable -> IO Animation -> IO ()
+makeWindow i a = do
+              (_progName, _args) <- getArgsAndInitialize
+              initialWindowSize $= Size 640 480
+              _window <- createWindow "Test"
+              blend $= Enabled
+              blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
+              viewport $= (Position 0 0, Size (fromIntegral 100) (fromIntegral 100))
+              iter <- newIORef 1  
+              displayCallback $= display i a iter
+              reshapeCallback $= Just reshape
+              idleCallback $= Just (idle iter)  
+              mainLoop
+              
+              
   
 reshape :: ReshapeCallback
 reshape size = do
@@ -125,10 +171,17 @@ idle iter = do
   iter $~! (+ 1)
   postRedisplay Nothing 
 
-display :: IORef Int -> DisplayCallback
-display iter = do
+display :: IO Drawable -> IO Animation -> IORef Int -> DisplayCallback
+display img ani iter = do
   clear [ ColorBuffer ]       -- clears canvas?
-  a <- get iter
+  iteration <- get iter
+  image     <- img
+  animation <- ani
+  
+  draw image
+  drawAnimation animation iteration
+  
+  {-
   i1 <- background
   i2 <- example1
   i3 <- example4
@@ -140,8 +193,9 @@ display iter = do
   --draw i1
   draw i2
   --draw i3
-  drawAnimation a1 a
-  drawAnimation a2 a
+  drawAnimation a1 iteration
+  drawAnimation a2 iteration
+  -}
   flush                       -- Sends openGL commands to graphics for display
 
 draw :: Drawable -> IO ()
@@ -322,7 +376,7 @@ animationMap :: (Drawable -> Drawable) -> Animation -> Animation
 animationMap f (Animation images frames) = Animation (map f images) frames
 
 mkAnimation :: [MyImage] -> Int -> Int -> Double -> Double -> Animation
-mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y h w)) images) (length images)
+mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y w h)) images) (length images)
 
 
 
@@ -472,8 +526,8 @@ colorAdd :: MyColor -> Int -> Int -> Int -> MyColor
 colorAdd (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
 
 -- Preserves opacity
-colorBlend :: MyColor -> MyColor -> Double -> MyColor
-colorBlend (MyColor r1 g1 b1 a) (MyColor r2 g2 b2 _) ratio =
+colorChangeTo :: MyColor -> MyColor -> Double -> MyColor
+colorChangeTo (MyColor r1 g1 b1 a) (MyColor r2 g2 b2 _) ratio =
     (MyColor (change r1 r2)
              (change g1 g2)
              (change b1 b2)
@@ -498,7 +552,7 @@ colorBlend (MyColor r1 g1 b1 a) (MyColor r2 g2 b2 _) ratio =
 animationBlink :: MyColor -> Int -> MyImage -> [MyImage]
 animationBlink c' frames image = map helper ([0..frames] ++ [frames-1,frames-2..0])
     where
-        helper frame = imageMap (\c -> colorBlend c c' ratio) image
+        helper frame = imageMap (\c -> colorChangeTo c c' ratio) image
             where
                 ratio = (toDouble frame) / (toDouble frames)
                 toDouble v = (fromIntegral (v :: Int) :: Double)
@@ -517,7 +571,7 @@ animationGlow colors colors' frames image@(MyImage matrix) = map helper ([0..fra
         coloredOutlines = map (\(image, color) -> imageReplaceAllColor color image)
                               outlinePairs
         -- Recolors based on the given frame ratio and the given ending colors
-        frameOutlines ratio = map (\(image, color') -> imageMap (\c -> colorBlend c color' ratio)
+        frameOutlines ratio = map (\(image, color') -> imageMap (\c -> colorChangeTo c color' ratio)
                                                                 image)
                                   (zip coloredOutlines colors')
         -- Places outlines on top of one another to create full outline
