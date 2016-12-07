@@ -9,6 +9,7 @@ import qualified Codec.Picture as J
 import qualified Data.ByteString as B
 import qualified Data.Vector.Storable as V
 import Data.Word
+import qualified Data.Matrix as M
 
 
 {-- TODO
@@ -30,7 +31,7 @@ fromPng path = do
                     makeImage :: J.DynamicImage -> MyImage
                     makeImage (J.ImageRGBA8 image@(J.Image w h _)) = convertPixels image w h
                     makeImage _ = blankImage 1 1
-                    convertPixels pixels w h = MyImage (zip (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points) points) w h
+                    convertPixels pixels w h = MyImage (M.fromList w h (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points))
                                             where
                                                 points = [(MyPoint x y) | x <- [0..w-1], y <- [0..h-1]]
                     pixelToColor ::  J.PixelRGBA8 -> MyColor
@@ -55,9 +56,9 @@ exampleRaw1   = fromPng "Sprites/MarioSmall_1.png"
 exampleRaw2   = fromPng "Sprites/MarioBig_1.png"
 backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 
-exF1 img = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1) img
-exF2 img = imageMap (\c -> colorAdd c (-20) 20 0) img
-exF3 img = imageInvert img
+exF1 = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
+exF2 = imageMap (\c -> colorAdd c (-20) 20 0)
+exF3 = imageInvert
 
 exA1 ani = (animationBlink ani 9)
 
@@ -143,19 +144,20 @@ drawCanvas = do
                     Vertex2 p n,
                     Vertex2 p p,
                     Vertex2 n p]                                      
-                                                                             
+                          
+{-                          
 blueRotate :: MyImage -> Int -> MyImage
-blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels)
-                                       w h
+blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels) w h
             where
                 rotate b v = (b + (v * 2)) `mod` 256 
-                          
+-}                          
                                                             
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
-blankImage w h = MyImage [((MyColor 256 256 256 1), (MyPoint x y)) | x <- [0..(w-1)] , y <- [0..(h-1)]] w h
+blankImage w h = MyImage $ M.fromList w h (replicate (w * h) (MyColor 256 256 256 1))
 
+{-
 gradientImage :: MyImage -> MyImage
 gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
               where
@@ -165,7 +167,7 @@ gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) 
                                                                  1),
                                                         point)
                 toFloat v = (fromIntegral (v :: Int) :: Float)
-
+-}
 
 
 
@@ -212,11 +214,27 @@ mkColorBounded r g b a = mkColor (bound r) (bound g) (bound b) (bounda a)
 -- MyImage contains a list of MyPixels
 -- and an integer describing its width
 -- and one for its height
-data MyImage = MyImage [(MyColor, MyPoint)] Int Int 
+data MyImage = MyImage (M.Matrix MyColor)
 
 imageMap :: (MyColor -> MyColor) -> MyImage -> MyImage
-imageMap f (MyImage pairs w h) = MyImage (map (\(color, point) -> ((f color), point)) pairs) w h
+imageMap f (MyImage matrix) = MyImage (matrixMap f matrix)
 
+imageMapXY :: (MyColor -> Int -> Int -> MyColor) -> MyImage -> MyImage
+imageMapXY f (MyImage matrix) = MyImage (matrixMapXY f matrix);
+
+matrixMap :: (a -> b) -> M.Matrix a -> M.Matrix b
+matrixMap f m = M.fromList cols rows (map f (M.toList m))
+    where
+        cols = M.ncols m
+        rows = M.nrows m
+            
+matrixMapXY :: (a -> Int -> Int -> b) -> M.Matrix a -> M.Matrix b            
+matrixMapXY f m = M.fromList cols rows (map helper (zip (M.toList m) grid))
+    where
+        grid = [(x,y) | x <- [1..(M.ncols m)], y <- [1..(M.nrows m)]]
+        helper (v, (x, y)) = f v x y
+        cols = M.ncols m
+        rows = M.nrows m
 
 -- Maintains speed of animation as number of loops per frame
 data Animation = Animation [Drawable] Int
@@ -241,55 +259,33 @@ mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y h w)) image
 data Drawable = Drawable [(Color4 Double, Vertex2 Double, Vertex2 Double)] Int Int
 
 toDrawable :: MyImage -> Int -> Int -> Double -> Double -> Drawable
-toDrawable (MyImage pairs imgW imgH) x y w h = Drawable (map helper pairs) imgW imgH
+toDrawable (MyImage matrix) x y w h = Drawable (M.toList (matrixMapXY helper matrix)) cols rows
     where
+        cols = M.ncols matrix
+        rows = M.nrows matrix
         toDouble  v = (fromIntegral (v :: Int) :: Double)
-        pixelWidth  = 2.0 / (toDouble imgW) * w
-        pixelHeight = 2.0 / (toDouble imgH) * h
+        pixelWidth  = 2.0 / (toDouble cols) * w
+        pixelHeight = 2.0 / (toDouble rows) * h
         scaleColor c = (toDouble c) / 256
-        helper ((MyColor r g b a), (MyPoint px py)) = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)    
+        helper (MyColor r g b a) px py = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)
             where
-                x1 = (((toDouble (px + x)) / (toDouble imgW) * 2 * w) - 1)
+                x1 = (((toDouble (px + x)) / (toDouble cols) * 2 * w) - 1)
                 x2 = x1 + pixelWidth
                 -- For some reason the juicypixels people made it so the top left
                 -- is the origin instead of the standard of having the bottom left
                 -- It could be backwards I'm too lazy to check.
-                y1 = (((toDouble (imgH - py + y)) / (toDouble imgH) * 2 * h) - 1)
+                y1 = (((toDouble (rows - py + y)) / (toDouble rows) * 2 * h) - 1)
                 y2 = y1 - pixelHeight
                 newColor = (Color4 (scaleColor r)
                                    (scaleColor g)
                                    (scaleColor b)
                                    a)
-
-{-
-toDrawable :: IO MyImage -> Int -> Int -> Double -> Double -> IO Drawable
-toDrawable ioImg x y w h = do
-                            res <- ioImg
-                            let (MyImage pairs imgW imgH) = res
-                                toDouble  v = (fromIntegral (v :: Int) :: Double)
-                                pixelWidth  = 2.0 / (toDouble imgW) * w
-                                pixelHeight = 2.0 / (toDouble imgH) * h
-                                scaleColor c = (toDouble c) / 256
-                                helper ((MyColor r g b a), (MyPoint px py)) = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)    
-                                    where
-                                        x1 = (((toDouble (px + x)) / (toDouble imgW) * 2 * w) - 1)
-                                        x2 = x1 + pixelWidth
-                                        -- For some reason the juicypixels people made it so the top left
-                                        -- is the origin instead of the standard of having the bottom left
-                                        -- It could be backwards I'm too lazy to check.
-                                        y1 = (((toDouble (imgH - py + y)) / (toDouble imgH) * 2 * h) - 1)
-                                        y2 = y1 - pixelHeight
-                                        newColor = (Color4 (scaleColor r)
-                                                           (scaleColor g)
-                                                           (scaleColor b)
-                                                           a)
-                            return $ Drawable (map helper pairs) imgW imgH
--}
-
+                                   
 {-------------------------------------------- Functions ------------------------------------------------}
 
 {-------------------------------------------- Image Functions ------------------------------------------}
 
+{-
 
 -- Split horizontally
 -- If n doesn't make sense or the image can't be split,
@@ -312,7 +308,8 @@ splitV image@(MyImage pairs w h) n
     | otherwise        = undefined
     where
         temp = [[0..(h `div` n)]]
-        
+    
+-}      
 
 imageReplaceColor :: Int -> MyColor -> MyColor -> MyImage -> MyImage
 imageReplaceColor m compare@(MyColor r' g' b' _) new image = imageMap helper image
@@ -326,10 +323,14 @@ imageReplaceColor m compare@(MyColor r' g' b' _) new image = imageMap helper ima
                 withinB = (abs (b' - b)) <= m
 
 imageInvert :: MyImage -> MyImage
-imageInvert image = imageMap (\(MyColor r g b a) -> mkColorBounded (255 - r) (255 - g) (255 - b) a) image
+imageInvert image = imageMap (\(MyColor r g b a) -> mkColorBounded (255 - r)
+                                                                   (255 - g)
+                                                                   (255 - b)
+                                                                   a)
+                             image
 
 imageGrayscale :: MyImage -> MyImage
-imageGrayscale image = imageMap helper image
+imageGrayscale image = imageMap helper matrix
     where
         helper (MyColor r g b a) = mkColorBounded l l l a
             where
@@ -356,7 +357,7 @@ colorAdd (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) 
 animationBlink :: MyImage -> Int -> [MyImage]
 animationBlink image frames = map helper ([0..frames] ++ [frames-1,frames-2..0])
     where
-        helper frame = imageMap (\c -> colorToWhite c frame) image 
+        helper frame = imageMap (\c -> colorToWhite c frame) image
         colorToWhite (MyColor r g b a) frame = (MyColor (whiten r ratio) (whiten g ratio) (whiten b ratio) a)
             where
                 ratio = (toDouble frame) / (toDouble frames)
