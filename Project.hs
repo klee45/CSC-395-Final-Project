@@ -18,13 +18,16 @@ test3 = exImg (do
                 i1 <- img3
                 i2 <- img4
                 return $ imageBlend 0.5 i1 i2) (\i -> i)
-test4 = exAniTwo img2 (exA3 . exF4) (exA2 . exF4)
-test5 = exAniTwo img1 (exA3 . exF4) (exA1 .
+test4 = exAniTwo img1 (exA3 . exF4) (exA1 .
                                      (\i -> imageReplaceAllColor (MyColor 0 0 0 1) i) .
                                      (\i -> imageGetOutline 1 i) .
                                      exF4)
-
+test5 = exAniTwo img5 (exA3 . exF4) (exA2 . exF4)                         
+test6 = exAniTwo img2 (exA2 . exF4) ((\a -> animationMap imageInvert a) .
+                                     exA3 .
+                                     exF4)
  
+
 {-- TODO
 
 Exporting
@@ -70,6 +73,7 @@ img1   = fromPng "Sprites/MarioSmall_1.png"
 img2   = fromPng "Sprites/MarioBig_1.png"
 img3   = fromPng "Sprites/Test/white1616.png"
 img4   = fromPng "Sprites/Test/red1616.png"
+img5   = fromPng "Sprites/Megaman.png"
 
 backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 
@@ -112,12 +116,12 @@ exBlankImage = toDrawable (transparentImage 1 1) 0 0 0.0 0.0
 exBlankAnimation = mkAnimation [(transparentImage 1 1)] 0 0 0.0 0.0
 
                                 
-colors1 = [(MyColor 255 255 50  1), (MyColor 128 175 0  1)]
-colors2 = [(MyColor 255 150 25  1), (MyColor 128 0   0   1)]
+colors1 = [(MyColor 200 200 255 1), (MyColor 50  50  150 1)]
+colors2 = [(MyColor 100 100 255 1), (MyColor 255 255 255 1)]
                                 
                                 
 exF1 = imageReplaceColor 80 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
-exF2 = imageMap (\c -> colorAdd c (-20) 20 0)
+exF2 = imageMap (\c -> colorAdd (-20) 20 0 c)
 exF3 = imageInvert
 
 -- Expand image 5 pixels on all sides with transparent pixels
@@ -379,13 +383,11 @@ data Animation = Animation [Drawable] Int
 getFrame :: Animation -> Int -> Drawable
 getFrame (Animation imgs _) frame = (!!) imgs (frame `mod` (length imgs))
 
-animationMap :: (Drawable -> Drawable) -> Animation -> Animation
-animationMap f (Animation images frames) = Animation (map f images) frames
+animationMap :: (MyImage -> MyImage) -> [MyImage] -> [MyImage]
+animationMap f images = map f images
 
 mkAnimation :: [MyImage] -> Int -> Int -> Double -> Double -> Animation
 mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y w h)) images) (length images)
-
-
 
 
 
@@ -561,9 +563,10 @@ imageOverlay (MyImage bottom) (MyImage top) =
         helper (c,(MyColor _ _ _ 0)) = c
         helper (c,c')                = c'
         
-imageApplyCondition :: (MyColor -> MyColor) -> (MyColor -> Bool) -> MyImage -> MyImage
-imageApplyCondition f cond image = imageMap (\c -> colorWithCondition f cond c) image
+imageConditionMap :: (MyColor -> Bool) -> (MyColor -> MyColor) -> MyImage -> MyImage
+imageConditionMap cond f image = imageMap (\c -> colorWithCondition f cond c) image
                 
+conditionTest = exImg img2 (\i -> imageConditionMap (\b -> not (colorIsOpaque b)) (\c -> colorAdd 100 100 100 c) i)
                 
 -- For now assumes same dimensions
 imageBlend :: Double -> MyImage -> MyImage -> MyImage
@@ -640,16 +643,17 @@ colorWithCondition f cond old
     | cond old  = f old
     | otherwise = old
 
-colorAdd :: MyColor -> Int -> Int -> Int -> MyColor
-colorAdd (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
+colorAdd :: Int -> Int -> Int -> MyColor -> MyColor
+colorAdd rp gp bp (MyColor r g b a) = mkColorBounded (r + rp) (g + gp) (b + bp) a
 
 -- Preserves opacity
 colorChangeTo :: MyColor -> MyColor -> Double -> MyColor
-colorChangeTo (MyColor r1 g1 b1 a) (MyColor r2 g2 b2 _) ratio =
+colorChangeTo old@(MyColor _ _ _ 0) _ _ = old
+colorChangeTo (MyColor r1 g1 b1 a1) (MyColor r2 g2 b2 a2) ratio =
     (MyColor (change r1 r2)
              (change g1 g2)
              (change b1 b2)
-             a)
+             (a1 + ((a2 - a1) * ratio)))
     where
         change v1 v2 = floor ((toDouble v1) + (toDouble (v2 - v1)) * ratio)
         toDouble v = (fromIntegral (v :: Int) :: Double)
@@ -673,9 +677,9 @@ colorRangeAlpha range (MyColor _ _ _ a) (MyColor _ _ _ a') = (abs (a' - a)) <= r
 inRange :: Int -> Int -> Int -> Bool
 inRange v v' range = (abs (v' - v)) <= range
 
-colorOpaque :: MyColor -> Bool
-colorOpaque (MyColor _ _ _ 0) = False
-colorOpaque _                 = True
+colorIsOpaque :: MyColor -> Bool
+colorIsOpaque (MyColor _ _ _ 0) = False
+colorIsOpaque _                 = True
 
 
 
@@ -713,8 +717,7 @@ animationGlow colors colors' frames image@(MyImage matrix) = map helper ([0..fra
         coloredOutlines = map (\(image, color) -> imageReplaceAllColor color image)
                               outlinePairs
         -- Recolors based on the given frame ratio and the given ending colors
-        frameOutlines ratio = map (\(image, color') -> imageMap (\c -> colorChangeTo c color' ratio)
-                                                                image)
+        frameOutlines ratio = map (\(image, color') -> imageMap (\c -> colorChangeTo c color' ratio) image)
                                   (zip coloredOutlines colors')
         -- Places outlines on top of one another to create full outline
         helper frame = foldl imageOverlay
@@ -742,7 +745,7 @@ animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pai
         colorPixel :: MyColor -> Int -> Int -> MyColor
         colorPixel c frame rowNum = colorWithCondition (\clr -> colorToRainbow clr
                                                                               (frame + rowNum * 20))
-                                                       colorOpaque
+                                                       colorIsOpaque
                                                        c
                                                        
         colorToRainbow :: MyColor -> Int -> MyColor
@@ -755,6 +758,9 @@ animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pai
                 bmod = (4 * pi / 3)
                 toRainbowColor c frameRowMod v = round ((sin ((2 * pi / (toDouble frames) * (toDouble frameRowMod)) + v)) * 127 + 128) 
                 toDouble v = (fromIntegral (v :: Int) :: Double)
+               
+               
+              
                 
                 
                 
@@ -769,9 +775,7 @@ animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pai
                 
                 
                 
-                
-                
-                
+               
 
 
 
