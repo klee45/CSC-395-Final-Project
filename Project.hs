@@ -12,11 +12,19 @@ import Data.Word
 import qualified Data.Matrix as M
 
 
-test1 = exBoth img2 (exF4 . exF3 . exF1) (exA2 . exF4)
+test1 = exAni  img2 (animationBlink (MyColor 255 0 0 1) 150)
+test2 = exBoth img2 (exF4 . exF3 . exF1) (exA2 . exF4)
+test3 = exImg (do
+                i1 <- img3
+                i2 <- img4
+                return $ imageBlend 0.5 i1 i2) (\i -> i)
+test4 = exAniTwo img2 (exA3 . exF4) (exA2 . exF4)
+test5 = exAniTwo img1 (exA3 . exF4) (exA1 .
+                                     (\i -> imageReplaceAllColor (MyColor 0 0 0 1) i) .
+                                     (\i -> imageGetOutline 1 i) .
+                                     exF4)
 
-
-
-
+ 
 {-- TODO
 
 Exporting
@@ -60,36 +68,55 @@ exColorWhite       = (MyColor 256 256 256 1)
 
 img1   = fromPng "Sprites/MarioSmall_1.png"
 img2   = fromPng "Sprites/MarioBig_1.png"
+img3   = fromPng "Sprites/Test/white1616.png"
+img4   = fromPng "Sprites/Test/red1616.png"
+
 backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 
 exImg :: IO MyImage -> (MyImage -> MyImage) -> IO ()
 exImg raw f = do
                 img <- raw
                 let image = toDrawable (f img) 5 5 0.35 0.5
-                makeWindow (return image) (return exBlankAnimation)              
+                makeWindow (return image)
+                           (return exBlankAnimation)   
+                           (return exBlankAnimation)
 
 exAni :: IO MyImage -> (MyImage -> [MyImage]) -> IO ()
 exAni raw f = do
                 img <- raw
                 let animation = mkAnimation (f img) 5 5 0.4 0.5
-                makeWindow (return exBlankImage) (return animation)
+                makeWindow (return exBlankImage)
+                           (return animation)
+                           (return exBlankAnimation)
                 
 exBoth :: IO MyImage -> (MyImage -> MyImage) -> (MyImage -> [MyImage]) -> IO ()
 exBoth raw fi fa = do
                     img <- raw
                     let image     = toDrawable  (fi img) 5 5 0.35 0.5
                     let animation = mkAnimation (fa img) 5 5 0.35 0.5
-                    makeWindow (return image) (return animation)
+                    makeWindow (return image)
+                               (return animation)
+                               (return exBlankAnimation)
+                    
+exAniTwo :: IO MyImage -> (MyImage -> [MyImage]) -> (MyImage -> [MyImage]) -> IO ()
+exAniTwo raw fa1 fa2 = do
+                        img <- raw
+                        let animation1 = mkAnimation (fa1 img) 5 5 0.35 0.5
+                        let animation2 = mkAnimation (fa2 img) 5 5 0.35 0.5
+                        makeWindow (return exBlankImage)
+                                   (return animation1)
+                                   (return animation2)
+
                        
 exBlankImage = toDrawable (transparentImage 1 1) 0 0 0.0 0.0
 exBlankAnimation = mkAnimation [(transparentImage 1 1)] 0 0 0.0 0.0
 
                                 
-colors1 = [(MyColor 255 255 50  1), (MyColor 255 150 25  1)]
-colors2 = [(MyColor 255 150 25  1), (MyColor 255 0   0   1)]
+colors1 = [(MyColor 255 255 50  1), (MyColor 128 175 0  1)]
+colors2 = [(MyColor 255 150 25  1), (MyColor 128 0   0   1)]
                                 
                                 
-exF1 = imageReplaceColor 50 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
+exF1 = imageReplaceColor 80 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
 exF2 = imageMap (\c -> colorAdd c (-20) 20 0)
 exF3 = imageInvert
 
@@ -98,8 +125,8 @@ exF4 = imageExpandBorders exColorTransparent 5 5 5 5
 exF5 = imageGetOutline 2
 
 exA1 = animationBlink (MyColor 256 256 256 1) 120
-
-exA2 = animationGlow colors1 colors2 30
+exA2 = animationGlow colors1 colors2 300
+exA3 = animationRainbow 500 0.5
 
 example1 = do 
             img <- img1
@@ -145,16 +172,17 @@ main i a = do
               mainLoop
 -}
               
-makeWindow :: IO Drawable -> IO Animation -> IO ()
-makeWindow i a = do
+makeWindow :: IO Drawable -> IO Animation -> IO Animation -> IO ()
+makeWindow i a1 a2 = do
               (_progName, _args) <- getArgsAndInitialize
-              initialWindowSize $= Size 640 480
+              initialWindowPosition $= Position 0 0
+              initialWindowSize $= Size 1280 960
               _window <- createWindow "Test"
               blend $= Enabled
               blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
               viewport $= (Position 0 0, Size (fromIntegral 100) (fromIntegral 100))
               iter <- newIORef 1  
-              displayCallback $= display i a iter
+              displayCallback $= display i a1 a2 iter
               reshapeCallback $= Just reshape
               idleCallback $= Just (idle iter)  
               mainLoop
@@ -171,15 +199,17 @@ idle iter = do
   iter $~! (+ 1)
   postRedisplay Nothing 
 
-display :: IO Drawable -> IO Animation -> IORef Int -> DisplayCallback
-display img ani iter = do
+display :: IO Drawable -> IO Animation -> IO Animation -> IORef Int -> DisplayCallback
+display img ani1 ani2 iter = do
   clear [ ColorBuffer ]       -- clears canvas?
-  iteration <- get iter
-  image     <- img
-  animation <- ani
+  iteration  <- get iter
+  image      <- img
+  animation1 <- ani1
+  animation2 <- ani2
   
   draw image
-  drawAnimation animation iteration
+  drawAnimation animation1 iteration
+  drawAnimation animation2 iteration
   
   {-
   i1 <- background
@@ -341,29 +371,6 @@ matrixMapXY f m = M.fromList rows cols (map helper (zip (M.toList m) grid))
         cols = M.ncols m
         rows = M.nrows m
 
-imageExpandBorders :: MyColor -> Int -> Int -> Int -> Int -> MyImage -> MyImage
-imageExpandBorders replace left right up down (MyImage old) = MyImage new
-    where
-        rows = M.nrows old
-        cols = M.ncols old
-        s1 = M.extendTo replace           -- Extend right and bottom border
-                        (down + rows)
-                        (right + cols)
-                        old
-        s2 = flip s1                      -- Reverse rows, transpose, reverse cols
-        s3 = M.extendTo replace
-                        (up + rows + down)
-                        (left + cols + right)
-                        s2
-        new = flip s3 
-        rev = map reverse . M.toLists
-        tra = M.transpose . M.fromLists
-        flip = tra . rev . tra . rev
-
-        
-        
-        
-        
 {------------------------------ Animation --------------------------------------------------}
         
 -- Maintains speed of animation as number of loops per frame
@@ -449,17 +456,18 @@ splitV image@(MyImage pairs w h) n
         temp = [[0..(h `div` n)]]
 -}
 
+imageTranspose :: MyImage -> MyImage
+imageTranspose (MyImage matrix) = MyImage (M.transpose matrix)
+
 imageReplaceColor :: Int -> MyColor -> MyColor -> MyImage -> MyImage
 imageReplaceColor m compare@(MyColor r' g' b' _) new image = imageMap helper image
     where
-        helper old@(MyColor _ _ _ 0)        = old
-        helper old@(MyColor r g b a)
-            | withinR && withinG && withinB = new
-            | otherwise                     = old 
-            where
-                withinR = (abs (r' - r)) <= m
-                withinG = (abs (g' - g)) <= m
-                withinB = (abs (b' - b)) <= m
+        helper old@(MyColor _ _ _ 0)          = old
+        helper old@(MyColor r g b _)
+            | (colorRangeRed   m old compare) && 
+              (colorRangeGreen m old compare) &&
+              (colorRangeBlue  m old compare) = new
+            | otherwise                       = old 
                 
 imageReplaceAllColor :: MyColor -> MyImage -> MyImage
 imageReplaceAllColor color = imageMap helper
@@ -481,6 +489,39 @@ imageGrayscale image = imageMap helper image
             where
                 l = round ((times 0.2126 r) + (times 0.7152 g) + (times 0.0722 b))
                 times dbl v = dbl * (fromIntegral (v :: Int) :: Double)
+
+                
+imageExpandBorders :: MyColor -> Int -> Int -> Int -> Int -> MyImage -> MyImage
+imageExpandBorders replace left right up down (MyImage old) = MyImage new
+    where
+        rows = M.nrows old
+        cols = M.ncols old
+        s1 = M.extendTo replace           -- Extend right and bottom border
+                        (down + rows)
+                        (right + cols)
+                        old
+        s2 = flip s1                      -- Reverse rows, transpose, reverse cols
+        s3 = M.extendTo replace
+                        (up + rows + down)
+                        (left + cols + right)
+                        s2
+        new = flip s3 
+        rev = map reverse . M.toLists
+        tra = M.transpose . M.fromLists
+        flip = tra . rev . tra . rev
+
+        
+imgStretchUD :: Int -> MyImage -> MyImage
+imgStretchUD times i = imageTranspose (imgStretchLR times (imageTranspose i))
+
+imgStretchLR :: Int -> MyImage -> MyImage
+imgStretchLR times image = MyImage (M.fromLists (map concat
+                                                (M.toLists (matrixMap (\c -> f c)
+                                                                      (getMatrix (expand image))))))
+    where
+        expand i = imageExpandBorders exColorTransparent 0 (imageGetWidth i) 0 0 i
+        f c = replicate times c
+        getMatrix (MyImage matrix) = matrix
                 
 {-
     Extremely simple edge detection algorithm
@@ -519,8 +560,85 @@ imageOverlay (MyImage bottom) (MyImage top) =
     where
         helper (c,(MyColor _ _ _ 0)) = c
         helper (c,c')                = c'
+        
+imageApplyCondition :: (MyColor -> MyColor) -> (MyColor -> Bool) -> MyImage -> MyImage
+imageApplyCondition f cond image = imageMap (\c -> colorWithCondition f cond c) image
+                
+                
+-- For now assumes same dimensions
+imageBlend :: Double -> MyImage -> MyImage -> MyImage
+imageBlend ratio img1@(MyImage m1) img2@(MyImage m2) =
+    MyImage $ M.fromList (imageGetHeight img1)
+                         (imageGetWidth  img1)
+                         (map (\(a,b) -> colorBlend ratio a b)
+                              (zip (M.toList m1)
+                                   (M.toList m2)))
+
+{-
+-- Scales to the largest width and largest height (to the right and up)
+imageBlend :: MyImage -> MyImage -> MyImage
+imageBlend img1 img2 = MyImage $ M.fromList tallest
+                                            widest
+                                            (map (\(a,b) -> colorBlend a b)
+                                                 (zip (M.toList (getMatrix img1'))
+                                                      (M.toList (getMatrix img2'))))
+    where
+        tallest
+            | h1 >= h2  = h1
+            | otherwise = h2
+            where
+                h1 = imageGetHeight img1
+                h2 = imageGetHeight img2
+        widest
+            | w1 >= w2  = w1
+            | otherwise = w2
+            where
+                w1 = imageGetWidth img1
+                w2 = imageGetWidth img2
+        scaleWidthVal img
+            | (imageGetWidth img) < widest = widest
+            | otherwise                    = 0
+        scaleHeightVal img
+            | (imageGetHeight img) < tallest = tallest
+            | otherwise                      = 0
+        scale img = imageExpandBorders exColorTransparent 0 (scaleWidthVal img) (scaleHeightVal img) 0 img
+        img1' = scale img1
+        img2' = scale img2
+        getMatrix (MyImage matrix) = matrix
+-}
+        
+{--------------------------------------- Image Utility Functions -----------------------------------------}
+
+imageGetHeight :: MyImage -> Int
+imageGetHeight (MyImage matrix) = M.nrows matrix
+
+imageGetWidth  :: MyImage -> Int
+imageGetWidth  (MyImage matrix) = M.ncols matrix
+
+
+
+
+                
+                
                 
 {--------------------------------------- Individual Color Functions --------------------------------------}
+
+colorBlend :: Double -> MyColor -> MyColor -> MyColor
+colorBlend _ (MyColor _ _ _ 0) c = c
+colorBlend _ c (MyColor _ _ _ 0) = c
+colorBlend ratio (MyColor r1 g1 b1 a1) (MyColor r2 g2 b2 a2) = (MyColor (f1 ratio r1 r2)
+                                                                        (f1 ratio g1 g2)
+                                                                        (f1 ratio b1 b2)
+                                                                        (f2 ratio a1 a2))
+    where
+        f1 ratio v1 v2 = round ((toDouble v1) * ratio + (toDouble v2) * (1 - ratio))
+        f2 ratio v1 v2 = v1 * ratio + v2 * (1 - ratio)
+        toDouble v = (fromIntegral (v :: Int) :: Double)
+
+colorWithCondition :: (MyColor -> MyColor) -> (MyColor -> Bool) -> MyColor -> MyColor
+colorWithCondition f cond old
+    | cond old  = f old
+    | otherwise = old
 
 colorAdd :: MyColor -> Int -> Int -> Int -> MyColor
 colorAdd (MyColor r g b a) rp gp bp = mkColorBounded (r + rp) (g + gp) (b + bp) a
@@ -535,6 +653,30 @@ colorChangeTo (MyColor r1 g1 b1 a) (MyColor r2 g2 b2 _) ratio =
     where
         change v1 v2 = floor ((toDouble v1) + (toDouble (v2 - v1)) * ratio)
         toDouble v = (fromIntegral (v :: Int) :: Double)
+
+
+        
+{----------------------------------------- Color Utility Functions ---------------------------------------}
+
+colorRangeRed :: Int -> MyColor -> MyColor -> Bool
+colorRangeRed   range (MyColor r _ _ _) (MyColor r' _ _ _) = inRange r r' range
+
+colorRangeGreen :: Int -> MyColor -> MyColor -> Bool
+colorRangeGreen range (MyColor _ g _ _) (MyColor _ g' _ _) = inRange g g' range
+
+colorRangeBlue :: Int -> MyColor -> MyColor -> Bool
+colorRangeBlue  range (MyColor _ _ b _) (MyColor _ _ b' _) = inRange b b' range
+
+colorRangeAlpha :: Double -> MyColor -> MyColor -> Bool
+colorRangeAlpha range (MyColor _ _ _ a) (MyColor _ _ _ a') = (abs (a' - a)) <= range
+
+inRange :: Int -> Int -> Int -> Bool
+inRange v v' range = (abs (v' - v)) <= range
+
+colorOpaque :: MyColor -> Bool
+colorOpaque (MyColor _ _ _ 0) = False
+colorOpaque _                 = True
+
 
 
 {--------------------------------------- Animation Functions ---------------------------------------------}
@@ -582,9 +724,37 @@ animationGlow colors colors' frames image@(MyImage matrix) = map helper ([0..fra
                 ratio = (toDouble frame) / (toDouble frames)
                 toDouble v = (fromIntegral (v :: Int) :: Double)
 
+animationRainbow :: Int -> Double ->  MyImage -> [MyImage]
+animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pairs
+    where
+        pairs :: [([([MyColor], Int)],Int)]
+        pairs = zip (replicate frames (zip (M.toLists matrix) [0..(M.nrows matrix)])) [0..frames]
+        
+        colorImageFramePair :: ([([MyColor], Int)],Int) -> MyImage
+        colorImageFramePair (rowPairs,frame) = imageBlend ratio (MyImage (M.fromLists (colorAllRows frame rowPairs))) img
+        
+        colorAllRows :: Int -> [([MyColor], Int)] ->  [[MyColor]]
+        colorAllRows frame rowPairs = map (\(row,rowNum) -> colorRow row frame rowNum) rowPairs
 
-
-
+        colorRow :: [MyColor] -> Int -> Int -> [MyColor]
+        colorRow row frame rowNum = map (\c -> colorPixel c frame rowNum) row
+                
+        colorPixel :: MyColor -> Int -> Int -> MyColor
+        colorPixel c frame rowNum = colorWithCondition (\clr -> colorToRainbow clr
+                                                                              (frame + rowNum * 20))
+                                                       colorOpaque
+                                                       c
+                                                       
+        colorToRainbow :: MyColor -> Int -> MyColor
+        colorToRainbow (MyColor r g b a) frameRowMod = MyColor (toRainbowColor r frameRowMod 0)
+                                                               (toRainbowColor g frameRowMod gmod)
+                                                               (toRainbowColor b frameRowMod bmod)
+                                                               a
+            where
+                gmod = (2 * pi / 3)
+                bmod = (4 * pi / 3)
+                toRainbowColor c frameRowMod v = round ((sin ((2 * pi / (toDouble frames) * (toDouble frameRowMod)) + v)) * 127 + 128) 
+                toDouble v = (fromIntegral (v :: Int) :: Double)
                 
                 
                 
