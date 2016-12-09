@@ -12,12 +12,21 @@ import Data.Word
 import qualified Data.Matrix as M
 
 
-test1 = exAni  img2 (animationBlink (MyColor 255 0 0 1) 150)
+{----------------------------------- DEMO section ---------------------------------------}
+
+exF10 = imageGetOutline 1
+exF11 = imageReplaceColor 10 (MyColor 255 255 255 0) (MyColor 255 0 0 1)
+exF12 = imageReplaceColor 10 (MyColor 255 255 255 0) (MyColor 0 255 0 1)
+exF13 = imageExpandBorders exColorTransparent 2 2 2 2
+
+test10 = exImg img1 (exF11 . exF10 . exF13)
+
+test11 = exImg img1 (\i -> (imageOverlay (imageExpandAndOutline 1 i)) (imageExpandBorders exColorTransparent 1 1 1 1 i))
+
+
+
+test1 = exAni img1 (animationBlink (MyColor 255 0 0 1) 300)
 test2 = exBoth img2 (exF4 . exF3 . exF1) (exA2 . exF4)
-test3 = exImg (do
-                i1 <- img3
-                i2 <- img4
-                return $ imageBlend 0.5 i1 i2) (\i -> i)
 test4 = exAniTwo img1 (exA3 . exF4) (exA1 .
                                      (\i -> imageReplaceAllColor (MyColor 0 0 0 1) i) .
                                      (\i -> imageGetOutline 1 i) .
@@ -28,6 +37,30 @@ test6 = exAniTwo img2 (exA2 . exF4) ((\a -> animationMap imageInvert a) .
                                      exF4)
  
 
+
+
+colors1 = [(MyColor 200 200 255 1), (MyColor 50  50  150 1)]
+colors2 = [(MyColor 100 100 255 1), (MyColor 255 255 255 1)]
+                                
+                                
+exF1 = imageReplaceColor 80 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
+exF2 = imageMap (\c -> colorAdd (-20) 20 0 c)
+exF3 = imageInvert
+
+-- Expand image 5 pixels on all sides with transparent pixels
+exF4 = imageExpandBorders exColorTransparent 5 5 5 5
+exF5 = imageGetOutline 2
+
+exF6 = imageGrayscale
+
+exA1 = animationBlink (MyColor 256 256 256 1) 120
+exA2 = animationGlow colors1 colors2 300
+exA3 = animationRainbow 500 0.5 
+ 
+imageExpandAndOutline v i = (imageGetOutline v (imageExpandBorders exColorTransparent v v v v i))
+ 
+ 
+ 
 {-- TODO
 
 Exporting
@@ -45,9 +78,9 @@ fromPng path = do
                     makeImage (J.ImageRGBA8 image@(J.Image w h _)) = convertPixels image w h
                     makeImage _ = blankImage 1 1
                     convertPixels pixels w h = MyImage (M.fromList h w (map (\(MyPoint x y) -> pixelToColor (J.pixelAt pixels x y)) points))
-                                            where
-                                                points = [(MyPoint x y) | y <- [0..h-1], x <- [0..w-1]]
-                    pixelToColor ::  J.PixelRGBA8 -> MyColor
+                        where
+                            points = [(MyPoint x y) | y <- [0..h-1], x <- [0..w-1]]
+                    pixelToColor :: J.PixelRGBA8 -> MyColor
                     pixelToColor (J.PixelRGBA8 r g b a) = MyColor (toInt r)
                                                                   (toInt g)
                                                                   (toInt b)
@@ -63,10 +96,9 @@ fromPng path = do
                 
 {---------------------------------------------------------------------------------}
 
-exColorTransparent = (MyColor 0 0 0 0)
+exColorTransparent = (MyColor 0   0   0   0)
 exColorWhite       = (MyColor 256 256 256 1)
 
-                
 {--------------------------- Loading some examples -------------------------------}
 
 img1   = fromPng "Sprites/MarioSmall_1.png"
@@ -80,7 +112,7 @@ backgroundRaw = fromPng "Sprites/BackgroundSmall.png"
 exImg :: IO MyImage -> (MyImage -> MyImage) -> IO ()
 exImg raw f = do
                 img <- raw
-                let image = toDrawable (f img) 5 5 0.35 0.5
+                let image = toDrawable (f img) 0 0 1.0 1.0
                 makeWindow (return image)
                            (return exBlankAnimation)   
                            (return exBlankAnimation)
@@ -88,7 +120,7 @@ exImg raw f = do
 exAni :: IO MyImage -> (MyImage -> [MyImage]) -> IO ()
 exAni raw f = do
                 img <- raw
-                let animation = mkAnimation (f img) 5 5 0.4 0.5
+                let animation = mkAnimation (f img) 0 0 1.0 1.0
                 makeWindow (return exBlankImage)
                            (return animation)
                            (return exBlankAnimation)
@@ -96,8 +128,8 @@ exAni raw f = do
 exBoth :: IO MyImage -> (MyImage -> MyImage) -> (MyImage -> [MyImage]) -> IO ()
 exBoth raw fi fa = do
                     img <- raw
-                    let image     = toDrawable  (fi img) 5 5 0.35 0.5
-                    let animation = mkAnimation (fa img) 5 5 0.35 0.5
+                    let image     = toDrawable  (fi img) 0 0 1.0 1.0
+                    let animation = mkAnimation (fa img) 0 0 1.0 1.0
                     makeWindow (return image)
                                (return animation)
                                (return exBlankAnimation)
@@ -105,8 +137,8 @@ exBoth raw fi fa = do
 exAniTwo :: IO MyImage -> (MyImage -> [MyImage]) -> (MyImage -> [MyImage]) -> IO ()
 exAniTwo raw fa1 fa2 = do
                         img <- raw
-                        let animation1 = mkAnimation (fa1 img) 5 5 0.35 0.5
-                        let animation2 = mkAnimation (fa2 img) 5 5 0.35 0.5
+                        let animation1 = mkAnimation (fa1 img) 0 0 1.0 1.0
+                        let animation2 = mkAnimation (fa2 img) 0 0 1.0 1.0 
                         makeWindow (return exBlankImage)
                                    (return animation1)
                                    (return animation2)
@@ -115,28 +147,11 @@ exAniTwo raw fa1 fa2 = do
 exBlankImage = toDrawable (transparentImage 1 1) 0 0 0.0 0.0
 exBlankAnimation = mkAnimation [(transparentImage 1 1)] 0 0 0.0 0.0
 
-                                
-colors1 = [(MyColor 200 200 255 1), (MyColor 50  50  150 1)]
-colors2 = [(MyColor 100 100 255 1), (MyColor 255 255 255 1)]
-                                
-                                
-exF1 = imageReplaceColor 80 (MyColor 184 64 64 1) (MyColor 0 255 0 1)
-exF2 = imageMap (\c -> colorAdd (-20) 20 0 c)
-exF3 = imageInvert
-
--- Expand image 5 pixels on all sides with transparent pixels
-exF4 = imageExpandBorders exColorTransparent 5 5 5 5
-exF5 = imageGetOutline 2
-
-exA1 = animationBlink (MyColor 256 256 256 1) 120
-exA2 = animationGlow colors1 colors2 300
-exA3 = animationRainbow 500 0.5
-
 example1 = do 
             img <- img1
             return $ toDrawable (exF5 (exF4 (exF3 (exF2 (exF1 img)))))
                                 5 5 0.25 0.30
-                                     
+                                    
 example2 = do
             img <- img2
             return $ mkAnimation (exA1 (exF4 img))
@@ -180,7 +195,7 @@ makeWindow :: IO Drawable -> IO Animation -> IO Animation -> IO ()
 makeWindow i a1 a2 = do
               (_progName, _args) <- getArgsAndInitialize
               initialWindowPosition $= Position 0 0
-              initialWindowSize $= Size 1280 960
+              initialWindowSize $= Size 640 900
               _window <- createWindow "Test"
               blend $= Enabled
               blendFunc $= (SrcAlpha, OneMinusSrcAlpha)
@@ -260,14 +275,14 @@ drawCanvas = do
                     Vertex2 p n,
                     Vertex2 p p,
                     Vertex2 n p]                                      
-                          
-{-                          
+
+{-
 blueRotate :: MyImage -> Int -> MyImage
 blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels) w h
             where
                 rotate b v = (b + (v * 2)) `mod` 256 
--}                          
-                                                            
+-}
+
 {-----------------------------   Library Functions   -------------------------}
 
 blankImage :: Int -> Int -> MyImage
