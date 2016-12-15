@@ -6,7 +6,10 @@ import Graphics.UI.GLUT
 import Data.IORef
 import Codec.Picture.Saving
 import qualified Codec.Picture as J
+import Codec.Picture.ColorQuant
+import Codec.Picture.Types
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as Bl
 import qualified Data.Vector.Storable as V
 import Data.Word
 import qualified Data.Matrix as M
@@ -22,7 +25,9 @@ exF13 = imageExpandBorders exColorTransparent 2 2 2 2
 test10 = exImg img1 (exF11 . exF10 . exF13)
 
 test11 = exImg img1 (\i -> (imageOverlay (imageExpandAndOutline 1 i)) (imageExpandBorders exColorTransparent 1 1 1 1 i))
-
+test12 = exAni (fromPng "Sprites/MarioBig.png") ((\i -> animationLengthen 200 i) .
+                                                 (\i -> splitSpriteSheet i 4 1))
+test13 = exAni (fromPng "Sprites/KabutopsSingle.png") (\i -> animationRainbow 50 0.3 i)
 
 
 test1 = exAni img1 (animationBlink (MyColor 255 0 0 1) 300)
@@ -49,16 +54,17 @@ exF3 = imageInvert
 
 -- Expand image 5 pixels on all sides with transparent pixels
 exF4 = imageExpandBorders exColorTransparent 5 5 5 5
-exF5 = imageGetOutline 2
+exF5 = imageGetOutline 1
 
 exF6 = imageGrayscale
 
-exA1 = animationBlink (MyColor 256 256 256 1) 120
+exF7 = imageReplaceAllColor (MyColor 255 0 255 1)
+
+exA1 = animationBlink (MyColor 255 255 255 1) 120
 exA2 = animationGlow colors1 colors2 300
 exA3 = animationRainbow 500 0.5 
  
 imageExpandAndOutline v i = (imageGetOutline v (imageExpandBorders exColorTransparent v v v v i))
- 
  
  
 {-- TODO
@@ -86,18 +92,48 @@ fromPng path = do
                                                                   (toInt b)
                                                                   (alphaConvert a)
                     toInt w = (fromIntegral (w :: Word8) :: Int)
-                    alphaConvert w = (fromIntegral (w :: Word8) :: Double) / 256
+                    alphaConvert w = (fromIntegral (w :: Word8) :: Double) / 255
 
                 file <- B.readFile path                 -- file   :: ByteString
                 let (Right result) = J.decodePng file   -- result :: DynamicImage
                 return (makeImage result)
 
+toJImage :: MyImage -> J.Image J.PixelRGBA8
+toJImage (MyImage matrix) = J.generateImage genPixel w h
+    where
+        w = M.ncols matrix
+        h = M.nrows matrix
+        toWord8 v = (fromIntegral (v :: Int) :: Word8)
+        genPixel x y = J.PixelRGBA8 (toWord8 r)
+                                    (toWord8 g)
+                                    (toWord8 b)
+                                    (ceiling (a * 255))
+            where (MyColor r g b a) = M.getElem (1 + y) (1 + x) matrix
 
                 
+toPng :: FilePath -> MyImage -> IO ()
+toPng path image = do
+                    Bl.writeFile path (J.encodePng (toJImage image))
+     
+ioToPng :: FilePath -> IO MyImage -> (MyImage -> MyImage) -> IO ()
+ioToPng path ioImg f = do
+                        image <- ioImg
+                        toPng path (f image)
+                        
+-- Delay is in 1/100th of second
+toGif :: FilePath -> [MyImage] -> Int -> IO ()
+toGif path images delay = do
+                            let (Right result) = J.encodeGifImages J.LoopingForever 
+                                                                   [(palette, delay, image) |
+                                                                        (image, palette) <- J.palettize defaultPaletteOptions <$> jImages]
+                            Bl.writeFile path result
+    where
+        jImages = map (\i -> J.pixelMap dropTransparency (toJImage (imageSetTransparentWhite i))) images        
+  
 {---------------------------------------------------------------------------------}
 
-exColorTransparent = (MyColor 0   0   0   0)
-exColorWhite       = (MyColor 256 256 256 1)
+exColorTransparent = (MyColor 255 255 255 0)
+exColorWhite       = (MyColor 255 255 255 1)
 
 {--------------------------- Loading some examples -------------------------------}
 
@@ -256,11 +292,6 @@ draw (Drawable triplet w h) = do
                                       
 drawAnimation :: Animation -> Int -> IO ()
 drawAnimation animation frame = draw (getFrame animation frame)
-
-drawBigPixel :: (Color4 Double, Vertex2 Double, Vertex2 Double) -> IO ()
-drawBigPixel (pixelColor, v1, v2) = do
-                                        color pixelColor
-                                        rect v1 v2
                  
 drawCanvas :: IO ()
 drawCanvas = do
@@ -280,7 +311,7 @@ drawCanvas = do
 blueRotate :: MyImage -> Int -> MyImage
 blueRotate (MyImage pixels w h) v = MyImage (map (\((MyColor r g b a), point) -> ((MyColor r g (rotate b v) a), point)) pixels) w h
             where
-                rotate b v = (b + (v * 2)) `mod` 256 
+                rotate b v = (b + (v * 2)) `mod` 255 
 -}
 
 {-----------------------------   Library Functions   -------------------------}
@@ -298,8 +329,8 @@ emptyImage w h color = MyImage $ M.fromList h w (replicate (w * h) color)
 gradientImage :: MyImage -> MyImage
 gradientImage (MyImage pixels w h) = MyImage (map (\p -> changePixel p) pixels) w h
               where
-                changePixel (_, point@(MyPoint x y)) = ((MyColor (round (((toFloat x) / (toFloat w)) * 256))
-                                                                 (round (((toFloat y) / (toFloat h)) * 256))
+                changePixel (_, point@(MyPoint x y)) = ((MyColor (round (((toFloat x) / (toFloat w)) * 255))
+                                                                 (round (((toFloat y) / (toFloat h)) * 255))
                                                                  128    
                                                                  1),
                                                         point)
@@ -339,7 +370,7 @@ instance Show MyColor where
         
 mkColor :: Int -> Int -> Int -> Double -> MyColor
 mkColor r g b a = assert (r >= 0 && g >= 0 && b >= 0 &&
-                          r < 256 && g < 256 && b < 256 &&
+                          r < 255 && g < 255 && b < 255 &&
                           a >= 0 && a <= 1)
                          $ MyColor r g b a
 
@@ -404,8 +435,15 @@ animationMap f images = map f images
 mkAnimation :: [MyImage] -> Int -> Int -> Double -> Double -> Animation
 mkAnimation images x y w h = Animation (map (\i -> (toDrawable i x y w h)) images) (length images)
 
-
-
+-- Divides the sheet into n images
+-- b is the number of pixels between each sprite
+splitSpriteSheet :: MyImage -> Int -> Int -> [MyImage]
+splitSpriteSheet (MyImage matrix) n b = map helper (take n [1,(imgWidth + 2)..])
+    where
+        imgWidth = (width - ((n - 1) * b)) `div` n
+        helper v = MyImage $ M.submatrix 1 height v (v + imgWidth - 1) matrix
+        width = M.ncols matrix
+        height = M.nrows matrix
 
 {------------------------------ Drawable --------------------------------------------------}
 {-
@@ -425,16 +463,16 @@ toDrawable (MyImage matrix) x y w h = Drawable (M.toList (matrixMapXY helper mat
         toDouble  v = (fromIntegral (v :: Int) :: Double)
         pixelWidth  = 2.0 / (toDouble cols) * w
         pixelHeight = 2.0 / (toDouble rows) * h
-        scaleColor c = (toDouble c) / 256
+        scaleColor c = (toDouble c) / 255
         helper (MyColor r g b a) px py = (newColor, Vertex2 x1 y1, Vertex2 x2 y2)
             where
                 -- Not actually magic numbers
-                x1 = (((toDouble (px + x)) / (toDouble cols) * 2 * w) - 1)
+                x1 = (((toDouble (px + x - 1)) / (toDouble cols) * 2 * w) - 1)
                 x2 = x1 + pixelWidth
                 -- For some reason the juicypixels people made it so the top left
                 -- is the origin instead of the standard of having the bottom left
                 -- It could be backwards I'm too lazy to check.
-                y1 = (((toDouble (rows - py + y)) / (toDouble rows) * 2 * h) - 1)
+                y1 = (((toDouble (rows - py + y + 1)) / (toDouble rows) * 2 * h) - 1)
                 y2 = y1 - pixelHeight
                 newColor = (Color4 (scaleColor r)
                                    (scaleColor g)
@@ -514,12 +552,12 @@ imageExpandBorders replace left right up down (MyImage old) = MyImage new
         rows = M.nrows old
         cols = M.ncols old
         s1 = M.extendTo replace           -- Extend right and bottom border
-                        (down + rows)
+                        (down  + rows)
                         (right + cols)
                         old
         s2 = flip s1                      -- Reverse rows, transpose, reverse cols
         s3 = M.extendTo replace
-                        (up + rows + down)
+                        (up   + rows + down)
                         (left + cols + right)
                         s2
         new = flip s3 
@@ -591,39 +629,13 @@ imageBlend ratio img1@(MyImage m1) img2@(MyImage m2) =
                          (map (\(a,b) -> colorBlend ratio a b)
                               (zip (M.toList m1)
                                    (M.toList m2)))
-
-{-
--- Scales to the largest width and largest height (to the right and up)
-imageBlend :: MyImage -> MyImage -> MyImage
-imageBlend img1 img2 = MyImage $ M.fromList tallest
-                                            widest
-                                            (map (\(a,b) -> colorBlend a b)
-                                                 (zip (M.toList (getMatrix img1'))
-                                                      (M.toList (getMatrix img2'))))
+                                   
+imageSetTransparentWhite :: MyImage -> MyImage
+imageSetTransparentWhite image = imageMap helper image
     where
-        tallest
-            | h1 >= h2  = h1
-            | otherwise = h2
-            where
-                h1 = imageGetHeight img1
-                h2 = imageGetHeight img2
-        widest
-            | w1 >= w2  = w1
-            | otherwise = w2
-            where
-                w1 = imageGetWidth img1
-                w2 = imageGetWidth img2
-        scaleWidthVal img
-            | (imageGetWidth img) < widest = widest
-            | otherwise                    = 0
-        scaleHeightVal img
-            | (imageGetHeight img) < tallest = tallest
-            | otherwise                      = 0
-        scale img = imageExpandBorders exColorTransparent 0 (scaleWidthVal img) (scaleHeightVal img) 0 img
-        img1' = scale img1
-        img2' = scale img2
-        getMatrix (MyImage matrix) = matrix
--}
+        helper (MyColor _ _ _ 0) = (MyColor 255 255 255 0)
+        helper c = c
+
         
 {--------------------------------------- Image Utility Functions -----------------------------------------}
 
@@ -717,6 +729,21 @@ animationBlink c' frames image = map helper ([0..frames] ++ [frames-1,frames-2..
             where
                 ratio = (toDouble frame) / (toDouble frames)
                 toDouble v = (fromIntegral (v :: Int) :: Double)
+                
+-- Rather than generate a blink off of a single animation,
+-- we apply it to an animation
+animationMapBlink :: MyColor -> [MyImage] -> [MyImage]
+animationMapBlink c' images = map helper (zip images frameList)
+    where
+        helper (image,frame) = imageMap (\c -> colorChangeTo c c' ratio) image
+            where
+                ratio = (toDouble frame) / (toDouble numImages)
+                toDouble v = (fromIntegral (v :: Int) :: Double)                
+        frameList
+            | numImages `mod` 2 == 0 = [0..half] ++ [half-1,half-2..1] -- Even
+            | otherwise              = [0..half] ++ [half,half-1..1]
+        numImages = length images
+        half = numImages `div` 2
 
 -- Both color lists must be the same length
 animationGlow :: [MyColor] -> [MyColor] -> Int -> MyImage -> [MyImage]
@@ -759,7 +786,7 @@ animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pai
                 
         colorPixel :: MyColor -> Int -> Int -> MyColor
         colorPixel c frame rowNum = colorWithCondition (\clr -> colorToRainbow clr
-                                                                              (frame + rowNum * 20))
+                                                                              (frame + rowNum))
                                                        colorIsOpaque
                                                        c
                                                        
@@ -773,24 +800,88 @@ animationRainbow frames ratio img@(MyImage matrix) = map colorImageFramePair pai
                 bmod = (4 * pi / 3)
                 toRainbowColor c frameRowMod v = round ((sin ((2 * pi / (toDouble frames) * (toDouble frameRowMod)) + v)) * 127 + 128) 
                 toDouble v = (fromIntegral (v :: Int) :: Double)
+                
+animationRainbowMap :: Double -> [MyImage] -> [MyImage]
+animationRainbowMap ratio images = map colorImageFramePair pairs
+    where
+        frames = length images
+        
+        joinedRows :: [[([MyColor], Int)]]
+        joinedRows = map (\(MyImage matrix) -> (zip (M.toLists matrix) [0..(M.nrows matrix)])) images
+
+        pairs :: [([([MyColor], Int)],Int)]
+        pairs = zip joinedRows [0..frames]
+        
+        colorImageFramePair :: ([([MyColor], Int)],Int) -> MyImage
+        colorImageFramePair (rowPairs,frame) = imageBlend ratio (MyImage (M.fromLists (colorAllRows frame rowPairs))) 
+                                                                (MyImage (M.fromLists (map (\(f,_) -> f) rowPairs)))
+        
+        colorAllRows :: Int -> [([MyColor], Int)] ->  [[MyColor]]
+        colorAllRows frame rowPairs = map (\(row,rowNum) -> colorRow row frame rowNum) rowPairs
+
+        colorRow :: [MyColor] -> Int -> Int -> [MyColor]
+        colorRow row frame rowNum = map (\c -> colorPixel c frame rowNum) row
+                
+        colorPixel :: MyColor -> Int -> Int -> MyColor
+        colorPixel c frame rowNum = colorWithCondition (\clr -> colorToRainbow clr
+                                                                              (frame + rowNum))
+                                                       colorIsOpaque
+                                                       c
+                                                       
+        colorToRainbow :: MyColor -> Int -> MyColor
+        colorToRainbow (MyColor r g b a) frameRowMod = MyColor (toRainbowColor r frameRowMod 0)
+                                                               (toRainbowColor g frameRowMod gmod)
+                                                               (toRainbowColor b frameRowMod bmod)
+                                                               a
+            where
+                gmod = (2 * pi / 3)
+                bmod = (4 * pi / 3)
+                toRainbowColor c frameRowMod v = round ((sin ((2 * pi / (toDouble frames) * (toDouble frameRowMod)) + v)) * 127 + 128) 
+                toDouble v = (fromIntegral (v :: Int) :: Double)
+
                
-               
+{--------------------------------------- Utility Animation Functions ---------------------------------------------}
+
+listLengthen :: Int -> [a] -> [a]
+listLengthen times images = foldl (++) [] (map (\i -> replicate times i) images)
+                
+-- Conveninece function with type condition
+animationLengthen :: Int -> [MyImage] -> [MyImage]
+animationLengthen = listLengthen
+                
+animationRepeat :: Int -> [MyImage] -> [MyImage]
+animationRepeat times imgs = foldl (++) [] (replicate times imgs)
+                
+                
+{------------------------------------------------------- GENERATED IMAGES ---------------------------------------------}
+
+generateAllSprites :: IO ()
+generateAllSprites = do
+                    demoBigMarioPurpleOutline
+                    demoGreenSmallMario
+                    demoKabutopsGifBlink
+                    demoKabutopsGifRainbow
+
+-- Generates a green mario
+demoBigMarioPurpleOutline =
+    ioToPng "Generated/Images/BigMarioPurpleOutline.png" (fromPng "Sprites/MarioBig_1.png")
+                                                         ((\i -> imageReplaceAllColor (MyColor 255 0 255 1) i) .
+                                                         (\i -> imageGetOutline 1 i) .
+                                                         (\i -> imageExpandBorders exColorTransparent 1 1 1 1 i))                
+                
+demoGreenSmallMario =
+    ioToPng "Generated/Images/GreenSmallMario.png" (fromPng "Sprites/MarioSmall_1.png")
+                                                   (\i -> imageReplaceColor 80 (MyColor 180 64 64 1) (MyColor 0 255 0 1) i)
+       
+demoKabutopsGifBlink = do
+                            img <- fromPng "Sprites/KabutopsSheet.png"
+                            toGif "Generated/Gifs/KabutopsBlink.gif" (animationMapBlink (MyColor 255 0 0 1) (splitSpriteSheet img 47 1)) 5
+
+demoKabutopsGifRainbow = do     
+                            img <- fromPng "Sprites/KabutopsSheet.png"
+                            toGif "Generated/Gifs/KabutopsRainbow.gif" (animationMapBlink (MyColor 255 255 255 1) (animationRainbowMap 0.3 (splitSpriteSheet img 47 1))) 5
+
               
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-               
 
 
 
